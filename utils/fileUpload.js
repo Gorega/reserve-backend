@@ -1,25 +1,33 @@
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const cloudinary = require('cloudinary').v2;
 const { badRequest } = require('./errorHandler');
 
-// Create upload directory if it doesn't exist
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// Create temporary upload directory if it doesn't exist
 const uploadDir = process.env.UPLOAD_DIR || 'uploads';
-console.log(`Upload directory configured as: ${uploadDir}`);
+console.log(`Temporary upload directory configured as: ${uploadDir}`);
 console.log(`Absolute path: ${path.resolve(uploadDir)}`);
 
 if (!fs.existsSync(uploadDir)) {
-  console.log(`Creating upload directory: ${uploadDir}`);
+  console.log(`Creating temporary upload directory: ${uploadDir}`);
   fs.mkdirSync(uploadDir, { recursive: true });
 } else {
-  console.log(`Upload directory already exists: ${uploadDir}`);
+  console.log(`Temporary upload directory already exists: ${uploadDir}`);
   
   // Check if directory is writable
   try {
     fs.accessSync(uploadDir, fs.constants.W_OK);
-    console.log(`Upload directory is writable: ${uploadDir}`);
+    console.log(`Temporary upload directory is writable: ${uploadDir}`);
   } catch (err) {
-    console.error(`Upload directory is not writable: ${uploadDir}`, err);
+    console.error(`Temporary upload directory is not writable: ${uploadDir}`, err);
   }
 }
 
@@ -85,48 +93,86 @@ const uploadMultiple = (fieldName, maxCount = 5) => {
 };
 
 /**
- * Get file URL from filename
- * @param {string} filename - Filename
- * @returns {string} - File URL
+ * Upload file to Cloudinary
+ * @param {string} filePath - Path to the local file
+ * @param {Object} options - Cloudinary upload options
+ * @returns {Promise<Object>} - Cloudinary upload result
  */
-const getFileUrl = (filename) => {
-  if (!filename) return null;
-  
-  // Get API URL from environment or use default
-  const apiUrl = process.env.API_URL || 'http://localhost:8000';
-  
-  // Make sure the URL doesn't have double slashes
-  const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-  
-  // Return full URL to the file
-  const url = `${baseUrl}/uploads/${filename}`;
-  console.log(`Generated URL for file ${filename}: ${url}`);
-  return url;
+const uploadToCloudinary = async (filePath, options = {}) => {
+  console.log(`Uploading to Cloudinary: ${filePath}`);
+  try {
+    const folder = process.env.CLOUDINARY_FOLDER || 'reserve-app';
+    const result = await cloudinary.uploader.upload(filePath, {
+      folder,
+      ...options
+    });
+    console.log(`File uploaded to Cloudinary: ${result.public_id}`);
+    return result;
+  } catch (error) {
+    console.error('Error uploading to Cloudinary:', error);
+    throw error;
+  } finally {
+    // Remove the local file after upload
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`Temporary file deleted: ${filePath}`);
+    }
+  }
 };
 
 /**
- * Delete a file
- * @param {string} filename - Filename to delete
+ * Get file URL from Cloudinary public_id or URL
+ * @param {string} publicIdOrUrl - Cloudinary public_id or URL
+ * @returns {string} - File URL
  */
-const deleteFile = (filename) => {
-  if (!filename) return;
+const getFileUrl = (publicIdOrUrl) => {
+  if (!publicIdOrUrl) return null;
   
-  const filePath = path.join(uploadDir, filename);
-  console.log(`Attempting to delete file: ${filePath}`);
+  // If it's already a complete URL, return it
+  if (publicIdOrUrl.startsWith('http')) {
+    return publicIdOrUrl;
+  }
   
-  // Check if file exists before attempting to delete
-  if (fs.existsSync(filePath)) {
-    console.log(`File exists, deleting: ${filePath}`);
-    fs.unlinkSync(filePath);
-    console.log(`File deleted: ${filePath}`);
-  } else {
-    console.log(`File does not exist, cannot delete: ${filePath}`);
+  // Return Cloudinary URL
+  return cloudinary.url(publicIdOrUrl, {
+    secure: true
+  });
+};
+
+/**
+ * Delete a file from Cloudinary
+ * @param {string} publicIdOrUrl - Cloudinary public_id or URL
+ * @returns {Promise<Object>} - Deletion result
+ */
+const deleteFile = async (publicIdOrUrl) => {
+  if (!publicIdOrUrl) return;
+  
+  try {
+    // Extract public_id from URL if needed
+    let publicId = publicIdOrUrl;
+    
+    if (publicIdOrUrl.includes('cloudinary.com')) {
+      // Extract public_id from Cloudinary URL
+      const urlParts = publicIdOrUrl.split('/');
+      const filenamePart = urlParts[urlParts.length - 1];
+      const filename = filenamePart.split('.')[0]; // Remove extension
+      publicId = `${process.env.CLOUDINARY_FOLDER || 'reserve-app'}/${filename}`;
+    }
+    
+    console.log(`Attempting to delete file from Cloudinary: ${publicId}`);
+    const result = await cloudinary.uploader.destroy(publicId);
+    console.log(`File deleted from Cloudinary: ${publicId}`, result);
+    return result;
+  } catch (error) {
+    console.error(`Error deleting file from Cloudinary: ${publicIdOrUrl}`, error);
+    throw error;
   }
 };
 
 module.exports = {
   uploadSingle,
   uploadMultiple,
+  uploadToCloudinary,
   getFileUrl,
   deleteFile
 }; 
