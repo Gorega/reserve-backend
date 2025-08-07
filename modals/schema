@@ -1,0 +1,461 @@
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(150) UNIQUE,
+    password_hash TEXT NOT NULL,
+    phone VARCHAR(20) NOT NULL UNIQUE,
+    profile_image TEXT,
+    is_provider BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    translated_name JSON DEFAULT NULL,
+    parent_id INT DEFAULT NULL,
+    FOREIGN KEY (parent_id) REFERENCES categories(id)
+);
+
+CREATE TABLE listings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    category_id INT NOT NULL,
+    listing_type ENUM('property', 'vehicle', 'service', 'venue', 'subscription') NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    price_per_hour DECIMAL(10,2),
+    price_per_day DECIMAL(10,2),
+    price_per_half_night DECIMAL(10,2),
+    unit_type ENUM('hour', 'day', 'session', 'night') DEFAULT 'hour',
+    is_hourly BOOLEAN DEFAULT TRUE,
+    location TEXT,
+    latitude DECIMAL(10,6),
+    longitude DECIMAL(10,6),
+    instant_booking BOOLEAN DEFAULT FALSE,
+    cancellation_policy ENUM('flexible', 'moderate', 'strict', 'non_refundable') DEFAULT 'moderate',
+    rating DECIMAL(3,2),
+    review_count INT DEFAULT 0,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (category_id) REFERENCES categories(id)
+);
+
+CREATE TABLE listing_photos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id INT NOT NULL,
+    image_url TEXT,
+    is_cover BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+CREATE TABLE listing_property_details (
+    listing_id INT PRIMARY KEY,
+    max_guests INT,
+    bedrooms INT,
+    beds INT,
+    bathrooms DECIMAL(3,1),
+    property_type ENUM('chalet', 'apartment', 'room', 'house', 'container', 'hotel', 'pool', 'other') NOT NULL,
+    room_type VARCHAR(50),
+    min_nights INT DEFAULT 1,
+    max_nights INT,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+CREATE TABLE listing_car_details (
+    listing_id INT PRIMARY KEY,
+    brand VARCHAR(100),
+    model VARCHAR(100),
+    year INT,
+    transmission ENUM('automatic', 'manual'),
+    seats INT,
+    fuel_type VARCHAR(50),
+    mileage INT,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+CREATE TABLE availability (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id INT NOT NULL,
+    date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    is_available BOOLEAN DEFAULT TRUE,
+    is_recurring BOOLEAN DEFAULT FALSE,
+    recurrence_pattern ENUM('daily', 'weekly', 'weekdays', 'weekends') NULL,
+    slot_duration INT, -- in minutes, for appointment-based services
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+CREATE TABLE bookings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id INT NOT NULL,
+    user_id INT NOT NULL,
+    start_datetime DATETIME NOT NULL,
+    end_datetime DATETIME NOT NULL,
+    booking_type ENUM('hourly', 'daily', 'session', 'appointment', 'subscription') DEFAULT 'hourly',
+    guests_count INT DEFAULT 1,
+    total_price DECIMAL(10,2) NOT NULL,
+    deposit_amount DECIMAL(10,2) DEFAULT 0,
+    remaining_amount DECIMAL(10,2) DEFAULT 0,
+    platform_commission DECIMAL(10,2) DEFAULT 0,
+    provider_earnings DECIMAL(10,2) DEFAULT 0,
+    user_service_fee DECIMAL(10,2) DEFAULT 0,
+    status ENUM('pending', 'confirmed', 'cancelled', 'completed') DEFAULT 'pending',
+    payment_status ENUM('unpaid', 'deposit_paid', 'fully_paid', 'refunded') DEFAULT 'unpaid',
+    deposit_deadline DATETIME,
+    auto_cancel_at DATETIME,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (listing_id) REFERENCES listings(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    booking_id INT NOT NULL,
+    method ENUM('card', 'cash_deposit', 'bank_transfer', 'other') NOT NULL,
+    amount DECIMAL(10,2),
+    deposit_amount DECIMAL(10,2) DEFAULT 0,
+    remaining_amount DECIMAL(10,2) DEFAULT 0,
+    payment_location_id INT,
+    payment_deadline DATETIME,
+    status ENUM('pending', 'deposit_paid', 'fully_paid', 'failed', 'refunded') DEFAULT 'pending',
+    transaction_id VARCHAR(255),
+    paid_at TIMESTAMP NULL,
+    FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
+);
+
+CREATE TABLE payment_locations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    address TEXT NOT NULL,
+    city VARCHAR(100) NOT NULL,
+    working_hours TEXT,
+    contact_phone VARCHAR(20),
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE commission_settings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    category_id INT DEFAULT NULL,
+    provider_commission_percent DECIMAL(5,2),
+    user_fee_percent DECIMAL(5,2),
+    is_active BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (category_id) REFERENCES categories(id)
+);
+
+CREATE TABLE payouts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    provider_id INT NOT NULL,
+    booking_id INT NOT NULL,
+    amount DECIMAL(10,2),
+    status ENUM('pending', 'paid', 'failed') DEFAULT 'pending',
+    payout_method VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (provider_id) REFERENCES users(id),
+    FOREIGN KEY (booking_id) REFERENCES bookings(id)
+);
+
+CREATE TABLE messages (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    sender_id INT NOT NULL,
+    receiver_id INT NOT NULL,
+    listing_id INT,
+    message TEXT,
+    is_read BOOLEAN DEFAULT FALSE,
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sender_id) REFERENCES users(id),
+    FOREIGN KEY (receiver_id) REFERENCES users(id)
+);
+
+CREATE TABLE reviews (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id INT NOT NULL,
+    reviewer_id INT NOT NULL,
+    rating INT CHECK (rating BETWEEN 1 AND 5),
+    comment TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (listing_id) REFERENCES listings(id),
+    FOREIGN KEY (reviewer_id) REFERENCES users(id)
+);
+
+CREATE TABLE wishlists (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    listing_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, listing_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+
+CREATE TABLE amenities (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    icon VARCHAR(100),
+    category VARCHAR(50),
+    description TEXT
+);
+
+CREATE TABLE listing_amenities (
+    listing_id INT NOT NULL,
+    amenity_id INT NOT NULL,
+    PRIMARY KEY (listing_id, amenity_id),
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    FOREIGN KEY (amenity_id) REFERENCES amenities(id) ON DELETE CASCADE
+);
+
+CREATE TABLE house_rules (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    icon VARCHAR(100),
+    description TEXT
+);
+
+CREATE TABLE listing_house_rules (
+    listing_id INT NOT NULL,
+    rule_id INT NOT NULL,
+    allowed BOOLEAN DEFAULT TRUE,
+    description TEXT,
+    PRIMARY KEY (listing_id, rule_id),
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    FOREIGN KEY (rule_id) REFERENCES house_rules(id) ON DELETE CASCADE
+);
+
+CREATE TABLE safety_features (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    icon VARCHAR(100),
+    description TEXT
+);
+
+CREATE TABLE listing_safety_features (
+    listing_id INT NOT NULL,
+    feature_id INT NOT NULL,
+    PRIMARY KEY (listing_id, feature_id),
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    FOREIGN KEY (feature_id) REFERENCES safety_features(id) ON DELETE CASCADE
+);
+
+CREATE TABLE host_profiles (
+    user_id INT PRIMARY KEY,
+    bio TEXT,
+    date_of_birth DATE,
+    languages JSON,
+    response_time VARCHAR(50),
+    response_rate DECIMAL(5,2),
+    acceptance_rate DECIMAL(5,2),
+    is_superhost BOOLEAN DEFAULT FALSE,
+    identity_verified BOOLEAN DEFAULT FALSE,
+    work VARCHAR(255),
+    education VARCHAR(255),
+    joined_date DATE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE provider_qualifications (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    issuing_organization VARCHAR(255),
+    issue_date DATE,
+    expiration_date DATE,
+    credential_id VARCHAR(100),
+    credential_url VARCHAR(255),
+    description TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE provider_portfolio (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    title VARCHAR(255),
+    description TEXT,
+    image_url TEXT NOT NULL,
+    sort_order INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE listing_reports (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id INT NOT NULL,
+    user_id INT NOT NULL,
+    reason ENUM('inappropriate', 'scam', 'not_as_described', 'offensive', 'other') NOT NULL,
+    description TEXT,
+    status ENUM('pending', 'reviewed', 'resolved', 'dismissed') DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP NULL,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE cancellation_policies (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name ENUM('flexible', 'moderate', 'strict', 'non_refundable') NOT NULL,
+    description TEXT NOT NULL,
+    refund_before_days INT NOT NULL,
+    refund_before_percentage INT NOT NULL,
+    refund_after_percentage INT NOT NULL
+);
+
+-- Add service-specific fields for different categories
+CREATE TABLE service_details (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id INT NOT NULL,
+    service_type ENUM('makeup', 'hair', 'nails', 'skin_care', 'photography', 'cleaning', 'personal_training', 'medical', 'massage', 'other') NOT NULL,
+    service_duration INT, -- in minutes
+    preparation_time INT, -- in minutes
+    cleanup_time INT, -- in minutes
+    brings_equipment BOOLEAN DEFAULT FALSE,
+    remote_service BOOLEAN DEFAULT FALSE,
+    experience_years INT,
+    appointment_required BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+
+CREATE TABLE blocked_dates (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id INT NOT NULL,
+    start_datetime DATETIME NOT NULL,
+    end_datetime DATETIME NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+CREATE TABLE listing_settings (
+    listing_id INT PRIMARY KEY,
+    availability_mode ENUM('available-by-default', 'blocked-by-default') DEFAULT 'available-by-default',
+    min_advance_booking_hours INT DEFAULT 24,
+    max_advance_booking_days INT DEFAULT 365,
+    instant_booking_enabled BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+CREATE TABLE listing_venue_details (
+    listing_id INT PRIMARY KEY,
+    venue_type ENUM('wedding_hall', 'conference_room', 'event_space', 'other') NOT NULL,
+    max_capacity INT,
+    indoor_space_sqm DECIMAL(10,2),
+    outdoor_space_sqm DECIMAL(10,2),
+    has_catering BOOLEAN DEFAULT FALSE,
+    has_parking BOOLEAN DEFAULT FALSE,
+    has_sound_system BOOLEAN DEFAULT FALSE,
+    has_stage BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+CREATE TABLE listing_subscription_details (
+    listing_id INT PRIMARY KEY,
+    subscription_type ENUM('gym', 'club', 'spa', 'other') NOT NULL,
+    duration_days INT,
+    recurring BOOLEAN DEFAULT FALSE,
+    includes_trainer BOOLEAN DEFAULT FALSE,
+    includes_classes BOOLEAN DEFAULT FALSE,
+    max_visits_per_week INT,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+
+
+-- Insert main categories first
+INSERT INTO categories (name, translated_name) VALUES 
+('Property', '{"ar": "أماكن", "he": "מקומות"}'),
+('Vehicle', '{"ar": "سيارات", "he": "רכבים להשכרה"}'),
+('Service', '{"ar": "خدمات", "he": "שירותים"}');
+-- ('Subscription', '{"ar": "اشتراكات", "he": "מנויים"}');
+
+-- Property subcategories (parent_id = 1)
+INSERT INTO categories (name, translated_name, parent_id) VALUES 
+('Chalet', '{"ar": "شاليه", "he": "צ׳לט"}', 1),
+('Apartment', '{"ar": "شقة", "he": "דירה"}', 1),
+('Room', '{"ar": "غرفة", "he": "חדר"}', 1),
+('House', '{"ar": "منزل", "he": "בית"}', 1),
+('Container', '{"ar": "كونتينر", "he": "קונטיינר"}', 1),
+('Hotel', '{"ar": "فندق", "he": "מלון"}', 1),
+('Pool', '{"ar": "مسبح", "he": "בריכה"}', 1),
+('Wedding Hall', '{"ar": "قاعة أفراح", "he": "אולם חתונות"}', 1),
+('Conference Room', '{"ar": "قاعة مؤتمرات", "he": "חדר כנסים"}', 1),
+('Event Space', '{"ar": "مساحة فعاليات", "he": "מרחב לאירועים"}', 1);
+
+-- Vehicle subcategories (parent_id = 2)
+INSERT INTO categories (name, translated_name, parent_id) VALUES
+('Toyota', '{"ar": "تويوتا", "he": "טויוטה"}', 2),
+('Honda', '{"ar": "هوندا", "he": "הונדה"}', 2),
+('Ford', '{"ar": "فورد", "he": "פורד"}', 2),
+('BMW', '{"ar": "بي إم دبليو", "he": "בי.מ.וו"}', 2),
+('Mercedes-Benz', '{"ar": "مرسيدس-بنز", "he": "מרצדס-בנץ"}', 2),
+('Audi', '{"ar": "أودي", "he": "אאודי"}', 2),
+('Volkswagen', '{"ar": "فولكס فاجن", "he": "פולקסווגן"}', 2),
+('Nissan', '{"ar": "نيسان", "he": "ניסאן"}', 2),
+('Hyundai', '{"ar": "هيونداي", "he": "יונדאי"}', 2),
+('Kia', '{"ar": "كيا", "he": "קיה"}', 2),
+('Chevrolet', '{"ar": "شيفרوלייה", "he": "שברולט"}', 2),
+('Tesla', '{"ar": "تسלה", "he": "טסלה"}', 2);
+
+-- Service subcategories (parent_id = 3)
+INSERT INTO categories (name, translated_name, parent_id) VALUES 
+('Makeup', '{"ar": "مكياج", "he": "איפור"}', 3),
+('Hair Styling', '{"ar": "تصفيف شعر", "he": "עיצוב שיער"}', 3),
+('Nail Care', '{"ar": "العناية بالأظافر", "he": "טיפוח ציפורניים"}', 3),
+('Photography', '{"ar": "استوديو تصوير", "he": "צילום"}', 3),
+('House Cleaning', '{"ar": "تنظيف منزل", "he": "ניקיון בית"}', 3),
+('Personal Training', '{"ar": "مدرب شخصي", "he": "אימון אישי"}', 3),
+('Medical Service', '{"ar": "خدمة طبية", "he": "שירות רפואי"}', 3),
+('Massage', '{"ar": "مساج", "he": "עיסוי"}', 3);
+
+-- Subscription subcategories (parent_id = 4)
+INSERT INTO categories (name, translated_name, parent_id) VALUES 
+('Gym', '{"ar": "صالة رياضية", "he": "חדר כושר"}', 4),
+('Club', '{"ar": "نادي", "he": "מועדון"}', 4),
+('Spa', '{"ar": "سبا", "he": "ספא"}', 4),
+('Co-working Space', '{"ar": "مساحة عمل مشتركة", "he": "חלל עבודה משותף"}', 4);
+
+
+---------------------------------------------------------------
+
+INSERT INTO amenities (name, icon, category, description) VALUES
+('Wi-Fi', 'wifi', 'property', 'Free wireless internet access'),
+('Air Conditioning', 'ac', 'property', 'Cool or heat the space with AC'),
+('Swimming Pool', 'pool', 'property', 'Access to a private or shared pool'),
+('Parking', 'parking', 'property', 'Free on-site parking'),
+('Kitchen', 'kitchen', 'property', 'Guests can cook their own meals'),
+('TV', 'tv', 'property', 'Flat screen TV with streaming options'),
+('Washer', 'washer', 'property', 'Laundry washer available'),
+('Hot Tub', 'hot_tub', 'property', 'Private or shared hot tub'),
+('Elevator', 'elevator', 'property', 'Elevator available in building'),
+('Gym', 'gym', 'property', 'Access to a gym or fitness area');
+
+
+INSERT INTO house_rules (name, icon, description) VALUES
+('No Smoking', 'no_smoking', 'Smoking is not allowed inside the property'),
+('No Pets', 'no_pets', 'Pets are not allowed'),
+('No Parties', 'no_parties', 'No events or parties allowed'),
+('Children Allowed', 'child_friendly', 'Children are welcome'),
+('Check-out Before 8AM', 'clock', 'Guests must check out before 8:00 AM');
+
+
+INSERT INTO safety_features (name, icon, description) VALUES
+('Smoke Detector', 'smoke_detector', 'Detects smoke in case of fire'),
+('Fire Extinguisher', 'fire_extinguisher', 'Device to extinguish small fires'),
+('First Aid Kit', 'first_aid', 'Kit for minor injuries'),
+('Security Camera', 'camera', 'External cameras for security purposes'),
+('Carbon Monoxide Detector', 'co_detector', 'Detects harmful CO gas');
+
+
+
+INSERT INTO cancellation_policies (name, description, refund_before_days, refund_before_percentage, refund_after_percentage) VALUES
+('flexible', 'Full refund 1 day prior to arrival, except fees', 1, 100, 0),
+('moderate', 'Full refund 5 days prior to arrival, except fees', 5, 100, 50),
+('strict', '50% refund up to 7 days before arrival, except fees', 7, 50, 0),
+('non_refundable', 'No refund available after booking confirmation', 0, 0, 0);
