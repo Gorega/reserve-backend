@@ -11,6 +11,13 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
+// Debug Cloudinary configuration
+console.log('Cloudinary Configuration:');
+console.log('Cloud Name:', process.env.CLOUDINARY_CLOUD_NAME ? 'Set' : 'NOT SET');
+console.log('API Key:', process.env.CLOUDINARY_API_KEY ? 'Set' : 'NOT SET');
+console.log('API Secret:', process.env.CLOUDINARY_API_SECRET ? 'Set' : 'NOT SET');
+console.log('Folder:', process.env.CLOUDINARY_FOLDER || 'reserve-app');
+
 // Create temporary upload directory if it doesn't exist
 const uploadDir = process.env.UPLOAD_DIR || 'uploads';
 console.log(`Temporary upload directory configured as: ${uploadDir}`);
@@ -100,21 +107,41 @@ const uploadMultiple = (fieldName, maxCount = 5) => {
  */
 const uploadToCloudinary = async (filePath, options = {}) => {
   console.log(`Uploading to Cloudinary: ${filePath}`);
+  
+  // Check if file exists
+  if (!require('fs').existsSync(filePath)) {
+    throw new Error(`File does not exist: ${filePath}`);
+  }
+  
+  // Check if Cloudinary is configured
+  if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+    throw new Error('Cloudinary configuration is missing. Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET environment variables.');
+  }
+  
   try {
     const folder = process.env.CLOUDINARY_FOLDER || 'reserve-app';
+    console.log(`Uploading to Cloudinary folder: ${folder}`);
+    
     const result = await cloudinary.uploader.upload(filePath, {
       folder,
       ...options
     });
+    
     console.log(`File uploaded to Cloudinary: ${result.public_id}`);
+    console.log(`Cloudinary URL: ${result.secure_url}`);
     return result;
   } catch (error) {
     console.error('Error uploading to Cloudinary:', error);
+    console.error('Error details:', {
+      message: error.message,
+      http_code: error.http_code,
+      name: error.name
+    });
     throw error;
   } finally {
     // Remove the local file after upload
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
+    if (require('fs').existsSync(filePath)) {
+      require('fs').unlinkSync(filePath);
       console.log(`Temporary file deleted: ${filePath}`);
     }
   }

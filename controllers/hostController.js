@@ -1,6 +1,6 @@
 const db = require('../config/database');
 const { errorHandler, notFound, badRequest } = require('../utils/errorHandler');
-const { getFileUrl, deleteFile } = require('../utils/fileUpload');
+const { getFileUrl, deleteFile, uploadToCloudinary } = require('../utils/fileUpload');
 
 /**
  * Host Controller
@@ -325,7 +325,18 @@ const hostController = {
       // Handle file upload if present
       let imageUrl = null;
       if (req.file) {
-        imageUrl = getFileUrl(req.file.filename);
+        try {
+          // Upload to Cloudinary
+          const cloudinaryResult = await uploadToCloudinary(req.file.path);
+          imageUrl = cloudinaryResult.secure_url;
+        } catch (uploadError) {
+          console.error('Error uploading portfolio image:', uploadError);
+          // Delete the local file if upload failed
+          if (req.file.path && require('fs').existsSync(req.file.path)) {
+            require('fs').unlinkSync(req.file.path);
+          }
+          return next(badRequest('Failed to upload portfolio image'));
+        }
       } else if (!req.body.image_url) {
         return res.status(400).json({
           status: 'error',
@@ -364,8 +375,8 @@ const hostController = {
       });
     } catch (error) {
       // Delete uploaded file if there was an error
-      if (req.file) {
-        deleteFile(req.file.filename);
+      if (req.file && req.file.path && require('fs').existsSync(req.file.path)) {
+        require('fs').unlinkSync(req.file.path);
       }
       next(errorHandler(error));
     }
@@ -406,12 +417,27 @@ const hostController = {
       
       // Handle file upload if present
       if (req.file) {
-        updateData.image_url = getFileUrl(req.file.filename);
-        
-        // Delete old image
-        if (portfolioItem.image_url) {
-          const oldFilename = portfolioItem.image_url.split('/').pop();
-          deleteFile(oldFilename);
+        try {
+          // Upload to Cloudinary
+          const cloudinaryResult = await uploadToCloudinary(req.file.path);
+          updateData.image_url = cloudinaryResult.secure_url;
+          
+          // Delete old image from Cloudinary
+          if (portfolioItem.image_url && portfolioItem.image_url.includes('cloudinary.com')) {
+            // Extract public_id from Cloudinary URL and delete
+            const urlParts = portfolioItem.image_url.split('/');
+            const filenamePart = urlParts[urlParts.length - 1];
+            const filename = filenamePart.split('.')[0]; // Remove extension
+            const publicId = `${process.env.CLOUDINARY_FOLDER || 'reserve-app'}/${filename}`;
+            await deleteFile(publicId);
+          }
+        } catch (uploadError) {
+          console.error('Error uploading portfolio image:', uploadError);
+          // Delete the local file if upload failed
+          if (req.file.path && require('fs').existsSync(req.file.path)) {
+            require('fs').unlinkSync(req.file.path);
+          }
+          return next(badRequest('Failed to upload portfolio image'));
         }
       }
       
@@ -430,8 +456,8 @@ const hostController = {
       });
     } catch (error) {
       // Delete uploaded file if there was an error
-      if (req.file) {
-        deleteFile(req.file.filename);
+      if (req.file && req.file.path && require('fs').existsSync(req.file.path)) {
+        require('fs').unlinkSync(req.file.path);
       }
       next(errorHandler(error));
     }

@@ -1,6 +1,6 @@
 const userModel = require('../models/userModel');
-const { serverError } = require('../utils/errorHandler');
-const { getFileUrl, deleteFile } = require('../utils/fileUpload');
+const { getFileUrl, deleteFile, uploadToCloudinary } = require('../utils/fileUpload');
+const { badRequest, notFound } = require('../utils/errorHandler');
 
 /**
  * User Controller
@@ -98,7 +98,18 @@ const userController = {
       
       // Handle file upload if present
       if (req.file) {
-        userData.profile_image = getFileUrl(req.file.filename);
+        try {
+          // Upload to Cloudinary
+          const cloudinaryResult = await uploadToCloudinary(req.file.path);
+          userData.profile_image = cloudinaryResult.secure_url;
+        } catch (uploadError) {
+          console.error('Error uploading profile image:', uploadError);
+          // Delete the local file if upload failed
+          if (req.file.path && require('fs').existsSync(req.file.path)) {
+            require('fs').unlinkSync(req.file.path);
+          }
+          return next(badRequest('Failed to upload profile image'));
+        }
       }
       
       const user = await userModel.create(userData);
@@ -109,8 +120,8 @@ const userController = {
       });
     } catch (error) {
       // Delete uploaded file if there was an error
-      if (req.file) {
-        deleteFile(req.file.filename);
+      if (req.file && req.file.path && require('fs').existsSync(req.file.path)) {
+        require('fs').unlinkSync(req.file.path);
       }
       next(error);
     }
@@ -129,13 +140,28 @@ const userController = {
       
       // Handle file upload if present
       if (req.file) {
-        userData.profile_image = getFileUrl(req.file.filename);
-        
-        // Get existing user to delete old profile image
-        const existingUser = await userModel.getById(id);
-        if (existingUser.profile_image) {
-          const oldFilename = existingUser.profile_image.split('/').pop();
-          deleteFile(oldFilename);
+        try {
+          // Upload to Cloudinary
+          const cloudinaryResult = await uploadToCloudinary(req.file.path);
+          userData.profile_image = cloudinaryResult.secure_url;
+          
+          // Get existing user to delete old profile image from Cloudinary
+          const existingUser = await userModel.getById(id);
+          if (existingUser.profile_image && existingUser.profile_image.includes('cloudinary.com')) {
+            // Extract public_id from Cloudinary URL and delete
+            const urlParts = existingUser.profile_image.split('/');
+            const filenamePart = urlParts[urlParts.length - 1];
+            const filename = filenamePart.split('.')[0]; // Remove extension
+            const publicId = `${process.env.CLOUDINARY_FOLDER || 'reserve-app'}/${filename}`;
+            await deleteFile(publicId);
+          }
+        } catch (uploadError) {
+          console.error('Error uploading profile image:', uploadError);
+          // Delete the local file if upload failed
+          if (req.file.path && require('fs').existsSync(req.file.path)) {
+            require('fs').unlinkSync(req.file.path);
+          }
+          return next(badRequest('Failed to upload profile image'));
         }
       }
       
@@ -147,8 +173,8 @@ const userController = {
       });
     } catch (error) {
       // Delete uploaded file if there was an error
-      if (req.file) {
-        deleteFile(req.file.filename);
+      if (req.file && req.file.path && require('fs').existsSync(req.file.path)) {
+        require('fs').unlinkSync(req.file.path);
       }
       next(error);
     }
@@ -166,12 +192,27 @@ const userController = {
       
       // Handle file upload if present
       if (req.file) {
-        userData.profile_image = getFileUrl(req.file.filename);
-        
-        // Delete old profile image
-        if (req.user.profile_image) {
-          const oldFilename = req.user.profile_image.split('/').pop();
-          deleteFile(oldFilename);
+        try {
+          // Upload to Cloudinary
+          const cloudinaryResult = await uploadToCloudinary(req.file.path);
+          userData.profile_image = cloudinaryResult.secure_url;
+          
+          // Delete old profile image from Cloudinary
+          if (req.user.profile_image && req.user.profile_image.includes('cloudinary.com')) {
+            // Extract public_id from Cloudinary URL and delete
+            const urlParts = req.user.profile_image.split('/');
+            const filenamePart = urlParts[urlParts.length - 1];
+            const filename = filenamePart.split('.')[0]; // Remove extension
+            const publicId = `${process.env.CLOUDINARY_FOLDER || 'reserve-app'}/${filename}`;
+            await deleteFile(publicId);
+          }
+        } catch (uploadError) {
+          console.error('Error uploading profile image:', uploadError);
+          // Delete the local file if upload failed
+          if (req.file.path && require('fs').existsSync(req.file.path)) {
+            require('fs').unlinkSync(req.file.path);
+          }
+          return next(badRequest('Failed to upload profile image'));
         }
       }
       
@@ -183,8 +224,8 @@ const userController = {
       });
     } catch (error) {
       // Delete uploaded file if there was an error
-      if (req.file) {
-        deleteFile(req.file.filename);
+      if (req.file && req.file.path && require('fs').existsSync(req.file.path)) {
+        require('fs').unlinkSync(req.file.path);
       }
       next(error);
     }

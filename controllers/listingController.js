@@ -1,6 +1,6 @@
 const listingModel = require('../models/listingModel');
 const { serverError, notFound, badRequest } = require('../utils/errorHandler');
-const { getFileUrl, deleteFile } = require('../utils/fileUpload');
+const { getFileUrl, deleteFile, uploadToCloudinary } = require('../utils/fileUpload');
 
 /**
  * Listing Controller
@@ -202,10 +202,26 @@ const listingController = {
       
       // Handle photos if files are uploaded
       if (req.files && req.files.length > 0) {
-        listingData.photos = req.files.map((file, index) => ({
-          image_url: getFileUrl(file.filename),
-          is_cover: index === 0 // First photo is cover by default
-        }));
+        const uploadedPhotos = [];
+        
+        for (const file of req.files) {
+          try {
+            // Upload to Cloudinary
+            const cloudinaryResult = await uploadToCloudinary(file.path);
+            uploadedPhotos.push({
+              image_url: cloudinaryResult.secure_url,
+              is_cover: uploadedPhotos.length === 0 // First photo is cover by default
+            });
+          } catch (uploadError) {
+            console.error(`Error uploading file ${file.filename}:`, uploadError);
+            // Delete the local file if upload failed
+            if (file.path && require('fs').existsSync(file.path)) {
+              require('fs').unlinkSync(file.path);
+            }
+          }
+        }
+        
+        listingData.photos = uploadedPhotos;
       }
       
       // Create listing
@@ -216,6 +232,14 @@ const listingController = {
         data: listing
       });
     } catch (error) {
+      // Clean up uploaded files if there was an error
+      if (req.files && req.files.length > 0) {
+        req.files.forEach(file => {
+          if (file.path && require('fs').existsSync(file.path)) {
+            require('fs').unlinkSync(file.path);
+          }
+        });
+      }
       next(error);
     }
   },
@@ -239,10 +263,26 @@ const listingController = {
       
       // Handle photos if files are uploaded
       if (req.files && req.files.length > 0) {
-        listingData.photos = req.files.map(file => ({
-          image_url: getFileUrl(file.filename),
-          is_cover: false // Don't set as cover by default when updating
-        }));
+        const uploadedPhotos = [];
+        
+        for (const file of req.files) {
+          try {
+            // Upload to Cloudinary
+            const cloudinaryResult = await uploadToCloudinary(file.path);
+            uploadedPhotos.push({
+              image_url: cloudinaryResult.secure_url,
+              is_cover: false // Don't set as cover by default when updating
+            });
+          } catch (uploadError) {
+            console.error(`Error uploading file ${file.filename}:`, uploadError);
+            // Delete the local file if upload failed
+            if (file.path && require('fs').existsSync(file.path)) {
+              require('fs').unlinkSync(file.path);
+            }
+          }
+        }
+        
+        listingData.photos = uploadedPhotos;
       }
       
       const updatedListing = await listingModel.update(id, listingData);
@@ -254,7 +294,11 @@ const listingController = {
     } catch (error) {
       // Delete uploaded files if there was an error
       if (req.files && req.files.length > 0) {
-        req.files.forEach(file => deleteFile(file.filename));
+        req.files.forEach(file => {
+          if (file.path && require('fs').existsSync(file.path)) {
+            require('fs').unlinkSync(file.path);
+          }
+        });
       }
       next(error);
     }
@@ -327,16 +371,21 @@ const listingController = {
       // Add each photo
       for (const file of req.files) {
         console.log(`Processing file: ${file.originalname}, saved as ${file.filename}`);
-        const imageUrl = getFileUrl(file.filename);
-        console.log(`Generated image URL: ${imageUrl}`);
         
         try {
-          const photo = await listingModel.addPhoto(id, imageUrl);
+          // Upload to Cloudinary
+          const cloudinaryResult = await uploadToCloudinary(file.path);
+          console.log(`Uploaded to Cloudinary: ${cloudinaryResult.secure_url}`);
+          
+          // Add to database with Cloudinary URL
+          const photo = await listingModel.addPhoto(id, cloudinaryResult.secure_url);
           addedPhotos.push(photo);
         } catch (photoError) {
           console.error(`Error adding photo ${file.filename}:`, photoError);
-          // Delete the file if there was an error adding it to the database
-          deleteFile(file.filename);
+          // Delete the local file if there was an error
+          if (file.path && require('fs').existsSync(file.path)) {
+            require('fs').unlinkSync(file.path);
+          }
         }
       }
       
@@ -356,7 +405,11 @@ const listingController = {
       
       // Delete uploaded files if there was an error
       if (req.files && req.files.length > 0) {
-        req.files.forEach(file => deleteFile(file.filename));
+        req.files.forEach(file => {
+          if (file.path && require('fs').existsSync(file.path)) {
+            require('fs').unlinkSync(file.path);
+          }
+        });
       }
       next(error);
     }
