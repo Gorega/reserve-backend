@@ -11,28 +11,16 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Debug Cloudinary configuration
-console.log('Cloudinary Configuration:');
-console.log('Cloud Name:', process.env.CLOUDINARY_CLOUD_NAME ? 'Set' : 'NOT SET');
-console.log('API Key:', process.env.CLOUDINARY_API_KEY ? 'Set' : 'NOT SET');
-console.log('API Secret:', process.env.CLOUDINARY_API_SECRET ? 'Set' : 'NOT SET');
-console.log('Folder:', process.env.CLOUDINARY_FOLDER || 'reserve-app');
-
 // Create temporary upload directory if it doesn't exist
 const uploadDir = process.env.UPLOAD_DIR || 'uploads';
-console.log(`Temporary upload directory configured as: ${uploadDir}`);
-console.log(`Absolute path: ${path.resolve(uploadDir)}`);
 
 if (!fs.existsSync(uploadDir)) {
-  console.log(`Creating temporary upload directory: ${uploadDir}`);
   fs.mkdirSync(uploadDir, { recursive: true });
 } else {
-  console.log(`Temporary upload directory already exists: ${uploadDir}`);
   
   // Check if directory is writable
   try {
     fs.accessSync(uploadDir, fs.constants.W_OK);
-    console.log(`Temporary upload directory is writable: ${uploadDir}`);
   } catch (err) {
     console.error(`Temporary upload directory is not writable: ${uploadDir}`, err);
   }
@@ -41,7 +29,6 @@ if (!fs.existsSync(uploadDir)) {
 // Configure storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    console.log(`Setting destination for file: ${file.originalname}`);
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
@@ -49,20 +36,16 @@ const storage = multer.diskStorage({
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const ext = path.extname(file.originalname);
     const filename = file.fieldname + '-' + uniqueSuffix + ext;
-    console.log(`Generated filename: ${filename} for original: ${file.originalname}`);
     cb(null, filename);
   }
 });
 
 // File filter to only allow images
 const fileFilter = (req, file, cb) => {
-  console.log(`Filtering file: ${file.originalname}, mimetype: ${file.mimetype}`);
   // Accept images only
   if (!file.originalname.match(/\.(jpg|jpeg|png|gif)$/)) {
-    console.log(`Rejected file: ${file.originalname} - not an image`);
     return cb(badRequest('Only image files are allowed!'), false);
   }
-  console.log(`Accepted file: ${file.originalname}`);
   cb(null, true);
 };
 
@@ -70,7 +53,6 @@ const fileFilter = (req, file, cb) => {
 const limits = {
   fileSize: process.env.MAX_FILE_SIZE || 5 * 1024 * 1024 // 5MB default
 };
-console.log(`File size limit: ${limits.fileSize} bytes`);
 
 // Create multer instance
 const upload = multer({
@@ -78,14 +60,12 @@ const upload = multer({
   fileFilter,
   limits
 });
-console.log('Multer upload middleware configured');
 
 /**
  * Upload a single file
  * @param {string} fieldName - Form field name for the file
  */
 const uploadSingle = (fieldName) => {
-  console.log(`Creating single file upload middleware for field: ${fieldName}`);
   return upload.single(fieldName);
 };
 
@@ -95,7 +75,6 @@ const uploadSingle = (fieldName) => {
  * @param {number} maxCount - Maximum number of files
  */
 const uploadMultiple = (fieldName, maxCount = 5) => {
-  console.log(`Creating multiple file upload middleware for field: ${fieldName}, max: ${maxCount}`);
   return upload.array(fieldName, maxCount);
 };
 
@@ -106,7 +85,6 @@ const uploadMultiple = (fieldName, maxCount = 5) => {
  * @returns {Promise<Object>} - Cloudinary upload result
  */
 const uploadToCloudinary = async (filePath, options = {}) => {
-  console.log(`Uploading to Cloudinary: ${filePath}`);
   
   // Check if file exists
   if (!require('fs').existsSync(filePath)) {
@@ -120,15 +98,12 @@ const uploadToCloudinary = async (filePath, options = {}) => {
   
   try {
     const folder = process.env.CLOUDINARY_FOLDER || 'reserve-app';
-    console.log(`Uploading to Cloudinary folder: ${folder}`);
     
     const result = await cloudinary.uploader.upload(filePath, {
       folder,
       ...options
     });
     
-    console.log(`File uploaded to Cloudinary: ${result.public_id}`);
-    console.log(`Cloudinary URL: ${result.secure_url}`);
     return result;
   } catch (error) {
     console.error('Error uploading to Cloudinary:', error);
@@ -142,7 +117,6 @@ const uploadToCloudinary = async (filePath, options = {}) => {
     // Remove the local file after upload
     if (require('fs').existsSync(filePath)) {
       require('fs').unlinkSync(filePath);
-      console.log(`Temporary file deleted: ${filePath}`);
     }
   }
 };
@@ -186,9 +160,7 @@ const deleteFile = async (publicIdOrUrl) => {
       publicId = `${process.env.CLOUDINARY_FOLDER || 'reserve-app'}/${filename}`;
     }
     
-    console.log(`Attempting to delete file from Cloudinary: ${publicId}`);
     const result = await cloudinary.uploader.destroy(publicId);
-    console.log(`File deleted from Cloudinary: ${publicId}`, result);
     return result;
   } catch (error) {
     console.error(`Error deleting file from Cloudinary: ${publicIdOrUrl}`, error);

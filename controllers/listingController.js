@@ -1,6 +1,7 @@
 const listingModel = require('../models/listingModel');
 const { serverError, notFound, badRequest } = require('../utils/errorHandler');
 const { getFileUrl, deleteFile, uploadToCloudinary } = require('../utils/fileUpload');
+const db = require('../config/database');
 
 /**
  * Listing Controller
@@ -261,36 +262,96 @@ const listingController = {
         return next(badRequest('You do not own this listing'));
       }
       
-      // Handle photos if files are uploaded
-      if (req.files && req.files.length > 0) {
-        const uploadedPhotos = [];
-        
-        for (const file of req.files) {
-          try {
-            // Upload to Cloudinary
-            const cloudinaryResult = await uploadToCloudinary(file.path);
-            uploadedPhotos.push({
-              image_url: cloudinaryResult.secure_url,
-              is_cover: false // Don't set as cover by default when updating
-            });
-          } catch (uploadError) {
-            console.error(`Error uploading file ${file.filename}:`, uploadError);
-            // Delete the local file if upload failed
-            if (file.path && require('fs').existsSync(file.path)) {
-              require('fs').unlinkSync(file.path);
+      // Start a transaction
+      const connection = await db.getPool().getConnection();
+      await connection.beginTransaction();
+      
+      try {
+        // Handle photo deletions first
+        if (listingData.photos_to_delete && listingData.photos_to_delete.length > 0) {
+          console.log('Deleting photos:', listingData.photos_to_delete);
+          
+          // Get photo URLs before deleting
+          const photosToDelete = await connection.query(
+            'SELECT image_url FROM listing_photos WHERE id IN (?)',
+            [listingData.photos_to_delete]
+          );
+
+          // Delete photos from Cloudinary
+          for (const photo of photosToDelete) {
+            try {
+              // Extract public_id from Cloudinary URL
+              const publicId = photo.image_url.split('/').slice(-1)[0].split('.')[0];
+              console.log('Deleting from Cloudinary:', publicId);
+              await deleteFile(publicId);
+            } catch (error) {
+              console.error('Error deleting photo from Cloudinary:', error);
             }
+          }
+
+          // Delete photos from database
+          await connection.query(
+            'DELETE FROM listing_photos WHERE id IN (?)',
+            [listingData.photos_to_delete]
+          );
+        }
+
+        // Update existing photos' cover status
+        if (listingData.existing_photos) {
+          for (const photo of listingData.existing_photos) {
+            await connection.query(
+              'UPDATE listing_photos SET is_cover = ? WHERE id = ?',
+              [photo.is_cover ? 1 : 0, photo.id]
+            );
+          }
+        }
+
+        // Handle new photos if files are uploaded
+        if (req.files && req.files.length > 0) {
+          const uploadedPhotos = [];
+          
+          for (const file of req.files) {
+            try {
+              // Upload to Cloudinary
+              const cloudinaryResult = await uploadToCloudinary(file.path);
+              uploadedPhotos.push({
+                image_url: cloudinaryResult.secure_url,
+                is_cover: false // Don't set as cover by default when updating
+              });
+            } catch (uploadError) {
+              console.error(`Error uploading file ${file.filename}:`, uploadError);
+              // Delete the local file if upload failed
+              if (file.path && require('fs').existsSync(file.path)) {
+                require('fs').unlinkSync(file.path);
+              }
+            }
+          }
+          
+          // Insert new photos
+          for (const photo of uploadedPhotos) {
+            await connection.query(
+              'INSERT INTO listing_photos (listing_id, image_url, is_cover) VALUES (?, ?, ?)',
+              [id, photo.image_url, photo.is_cover ? 1 : 0]
+            );
           }
         }
         
-        listingData.photos = uploadedPhotos;
+        const updatedListing = await listingModel.update(id, listingData);
+        
+        // Commit transaction
+        await connection.commit();
+        
+        res.status(200).json({
+          status: 'success',
+          data: updatedListing
+        });
+      } catch (error) {
+        // Rollback transaction on error
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
       }
-      
-      const updatedListing = await listingModel.update(id, listingData);
-      
-      res.status(200).json({
-        status: 'success',
-        data: updatedListing
-      });
     } catch (error) {
       // Delete uploaded files if there was an error
       if (req.files && req.files.length > 0) {
