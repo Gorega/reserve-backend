@@ -36,6 +36,23 @@ router.get(
  * @route   POST /api/listings
  * @desc    Create a new listing
  * @access  Private/Provider
+ * @body    {
+ *            title: string,
+ *            description: string,
+ *            location: string,
+ *            latitude: number,
+ *            longitude: number,
+ *            pricing_options: [{
+ *              id: string,
+ *              price: number,
+ *              unit_type: 'hour'|'day'|'night',
+ *              duration: number
+ *            }],
+ *            unit_type: 'hour'|'day'|'night',
+ *            ... other fields
+ *          }
+ * @note    The pricing_options field allows defining multiple pricing options with different unit types and durations.
+ *          For backward compatibility, the API still accepts price_per_hour, price_per_day, and price_per_half_night fields.
  */
 router.post(
   '/',
@@ -51,6 +68,23 @@ router.post(
  * @route   PUT /api/listings/:id
  * @desc    Update a listing
  * @access  Private/Owner
+ * @body    {
+ *            title: string,
+ *            description: string,
+ *            location: string,
+ *            latitude: number,
+ *            longitude: number,
+ *            pricing_options: [{
+ *              id: string,
+ *              price: number,
+ *              unit_type: 'hour'|'day'|'night',
+ *              duration: number
+ *            }],
+ *            unit_type: 'hour'|'day'|'night',
+ *            ... other fields
+ *          }
+ * @note    The pricing_options field allows defining multiple pricing options with different unit types and durations.
+ *          For backward compatibility, the API still accepts price_per_hour, price_per_day, and price_per_half_night fields.
  */
 router.put(
   '/:id',

@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { errorHandler, notFound, badRequest } = require('../utils/errorHandler');
+const { toUTCDateString, createUTCDateTime, extractTimeFromDateTime, extractDateFromDateTime, doDateRangesOverlap, startOfDay, endOfDay } = require('../utils/dateUtils');
 
 /**
  * Blocked Dates Controller
@@ -38,10 +39,75 @@ const blockedDatesController = {
       
       if (availabilityMode === 'available-by-default') {
         // In available-by-default mode, return explicitly blocked dates
-        blockedDates = await db.query(
+        const rawBlockedDates = await db.query(
           'SELECT * FROM blocked_dates WHERE listing_id = ? ORDER BY start_datetime ASC',
           [listingId]
         );
+        
+        // Format blocked dates to match the same format as available dates
+        blockedDates = rawBlockedDates.map(blocked => {
+          try {
+            // Extract date and time parts from start_datetime and end_datetime
+            let startDateTime, endDateTime;
+            
+            if (blocked.start_datetime) {
+              if (typeof blocked.start_datetime === 'string' && blocked.start_datetime.includes('T')) {
+                // Remove timezone info if present and keep just YYYY-MM-DDTHH:MM:SS format
+                startDateTime = blocked.start_datetime.split('.')[0].replace('Z', '');
+              } else if (blocked.start_datetime instanceof Date) {
+                // For Date objects, format without timezone
+                const year = blocked.start_datetime.getFullYear();
+                const month = String(blocked.start_datetime.getMonth() + 1).padStart(2, '0');
+                const day = String(blocked.start_datetime.getDate()).padStart(2, '0');
+                const hours = String(blocked.start_datetime.getHours()).padStart(2, '0');
+                const minutes = String(blocked.start_datetime.getMinutes()).padStart(2, '0');
+                const seconds = String(blocked.start_datetime.getSeconds()).padStart(2, '0');
+                startDateTime = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+              } else {
+                startDateTime = blocked.start_datetime;
+              }
+            }
+            
+            if (blocked.end_datetime) {
+              if (typeof blocked.end_datetime === 'string' && blocked.end_datetime.includes('T')) {
+                // Remove timezone info if present and keep just YYYY-MM-DDTHH:MM:SS format
+                endDateTime = blocked.end_datetime.split('.')[0].replace('Z', '');
+              } else if (blocked.end_datetime instanceof Date) {
+                // For Date objects, format without timezone
+                const year = blocked.end_datetime.getFullYear();
+                const month = String(blocked.end_datetime.getMonth() + 1).padStart(2, '0');
+                const day = String(blocked.end_datetime.getDate()).padStart(2, '0');
+                const hours = String(blocked.end_datetime.getHours()).padStart(2, '0');
+                const minutes = String(blocked.end_datetime.getMinutes()).padStart(2, '0');
+                const seconds = String(blocked.end_datetime.getSeconds()).padStart(2, '0');
+                endDateTime = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+              } else {
+                endDateTime = blocked.end_datetime;
+              }
+            }
+            
+            return {
+              id: blocked.id,
+              listing_id: blocked.listing_id,
+              start_datetime: startDateTime,
+              end_datetime: endDateTime,
+              reason: blocked.reason || '',
+              created_at: blocked.created_at,
+              is_available: false
+            };
+          } catch (err) {
+            console.error('Error formatting blocked date:', err, 'for record:', blocked);
+            return {
+              id: blocked.id,
+              listing_id: blocked.listing_id,
+              start_datetime: null,
+              end_datetime: null,
+              reason: blocked.reason || 'Error parsing date/time',
+              created_at: blocked.created_at,
+              is_available: false
+            };
+          }
+        });
       } else {
         // In blocked-by-default mode, return available dates from availability table
         // Get available dates from the availability table
@@ -50,17 +116,33 @@ const blockedDatesController = {
           [listingId]
         );
         
-        // Debug log to check what's coming from the database
-        console.log('Available dates from DB:', availableDates);
+
         
         // Transform available dates to the blocked_dates format for consistency
         // We're returning available slots as "unblocked" dates
         blockedDates = availableDates.map(available => {
           try {
-            // Format the date properly - it's already a Date object from the database
-            const dateStr = available.date.toISOString().split('T')[0]; // Extract YYYY-MM-DD
-            const startDateTime = new Date(`${dateStr}T${available.start_time}`);
-            const endDateTime = new Date(`${dateStr}T${available.end_time}`);
+            // Use the date directly as YYYY-MM-DD format without timezone conversion
+            let dateStr;
+            if (available.date) {
+              // Extract just the date part (YYYY-MM-DD) from any date format
+              if (typeof available.date === 'string' && available.date.includes('T')) {
+                dateStr = available.date.split('T')[0];
+              } else if (available.date instanceof Date) {
+                // For Date objects, use getFullYear, getMonth, getDate to avoid timezone issues
+                const year = available.date.getFullYear();
+                const month = String(available.date.getMonth() + 1).padStart(2, '0');
+                const day = String(available.date.getDate()).padStart(2, '0');
+                dateStr = `${year}-${month}-${day}`;
+
+              } else {
+                dateStr = available.date;
+              }
+            }
+            
+            // Create datetime strings by combining date with times, but keep them simple
+            const startDateTime = `${dateStr}T${available.start_time || '00:00:00'}`;
+            const endDateTime = `${dateStr}T${available.end_time || '23:59:00'}`;
             
             return {
               id: available.id,
@@ -124,11 +206,13 @@ const blockedDatesController = {
         });
       }
       
-      // Validate dates
-      const startDate = new Date(start_datetime);
-      const endDate = new Date(end_datetime);
-      
-      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      // Validate dates using our utility functions
+      try {
+        // Ensure we're working with proper UTC dates
+        const startDate = new Date(start_datetime);
+        const endDate = new Date(end_datetime);
+        
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
         return res.status(400).json({
           status: 'error',
           message: 'Invalid date format'
@@ -141,8 +225,14 @@ const blockedDatesController = {
           message: 'Start date must be before end date'
         });
       }
+      } catch (err) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid date format: ' + err.message
+        });
+      }
       
-      // Check for conflicts with existing bookings
+      // Check for conflicts with existing bookings using our date utility
       const bookings = await db.query(`
         SELECT * FROM bookings 
         WHERE listing_id = ? AND status IN ('pending', 'confirmed')
@@ -226,35 +316,56 @@ const blockedDatesController = {
         updateData.reason = reason;
       }
       
-      // Validate dates if both are provided
+      // Validate dates if both are provided using our utility functions
       if (updateData.start_datetime && updateData.end_datetime) {
-        const startDate = new Date(updateData.start_datetime);
-        const endDate = new Date(updateData.end_datetime);
-        
-        if (startDate >= endDate) {
+        try {
+          const startDate = new Date(updateData.start_datetime);
+          const endDate = new Date(updateData.end_datetime);
+          
+          if (startDate >= endDate) {
           return res.status(400).json({
             status: 'error',
             message: 'Start date must be before end date'
+          });
+        }
+        } catch (err) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid date format: ' + err.message
           });
         }
       } else if (updateData.start_datetime) {
-        const startDate = new Date(updateData.start_datetime);
-        const endDate = new Date(blockedDate.end_datetime);
-        
-        if (startDate >= endDate) {
+        try {
+          const startDate = new Date(updateData.start_datetime);
+          const endDate = new Date(blockedDate.end_datetime);
+          
+          if (startDate >= endDate) {
           return res.status(400).json({
             status: 'error',
             message: 'Start date must be before end date'
           });
         }
+        } catch (err) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid date format: ' + err.message
+          });
+        }
       } else if (updateData.end_datetime) {
-        const startDate = new Date(blockedDate.start_datetime);
-        const endDate = new Date(updateData.end_datetime);
-        
-        if (startDate >= endDate) {
+        try {
+          const startDate = new Date(blockedDate.start_datetime);
+          const endDate = new Date(updateData.end_datetime);
+          
+          if (startDate >= endDate) {
           return res.status(400).json({
             status: 'error',
             message: 'Start date must be before end date'
+          });
+        }
+        } catch (err) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid date format: ' + err.message
           });
         }
       }

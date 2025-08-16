@@ -118,6 +118,7 @@ const bookingModel = {
                l.title as listing_title,
                l.price_per_hour,
                l.price_per_day,
+               l.unit_type as listing_unit_type,
                l.user_id as provider_id,
                p.id as payment_id,
                p.method as payment_method,

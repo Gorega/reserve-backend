@@ -38,6 +38,12 @@ const bookingController = {
       // Get bookings
       const bookings = await bookingModel.getAll(filters, page, limit);
       
+      // Add unit_type to each booking for frontend compatibility
+      bookings.forEach(booking => {
+        // Make sure unit_type is always available
+        booking.unit_type = booking.listing_unit_type || 'hour';
+      });
+      
       // Build count query - use the same structure as in the model
       let countQuery = `
         SELECT COUNT(*) as total
@@ -128,6 +134,9 @@ const bookingController = {
       ) {
         return next(badRequest('You do not have permission to view this booking'));
       }
+      
+      // Make sure unit_type is always available for frontend compatibility
+      booking.unit_type = booking.listing_unit_type || booking.unit_type || 'hour';
       
       res.status(200).json({
         status: 'success',

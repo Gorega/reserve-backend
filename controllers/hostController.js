@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { errorHandler, notFound, badRequest } = require('../utils/errorHandler');
+const { toUTCDateString, createUTCDateTime, extractTimeFromDateTime, extractDateFromDateTime, doDateRangesOverlap, startOfDay, endOfDay } = require('../utils/dateUtils');
 const { getFileUrl, deleteFile, uploadToCloudinary } = require('../utils/fileUpload');
 
 /**
@@ -897,14 +898,66 @@ const hostController = {
         [listingId]
       );
       
-      // Format data for frontend
-      const formattedBlockedDates = blockedDates.map(blockedDate => ({
-        id: blockedDate.id,
-        type: 'blocked',
-        startDate: blockedDate.start_datetime,
-        endDate: blockedDate.end_datetime,
-        reason: blockedDate.reason || ''
-      }));
+      // Format data for frontend - consistent with other date handling
+      const formattedBlockedDates = blockedDates.map(blockedDate => {
+        try {
+          // Extract date and time parts from start_datetime and end_datetime
+          let startDateTime, endDateTime;
+          
+          if (blockedDate.start_datetime) {
+            if (typeof blockedDate.start_datetime === 'string' && blockedDate.start_datetime.includes('T')) {
+              // Remove timezone info if present and keep just YYYY-MM-DDTHH:MM:SS format
+              startDateTime = blockedDate.start_datetime.split('.')[0].replace('Z', '');
+            } else if (blockedDate.start_datetime instanceof Date) {
+              // For Date objects, format without timezone
+              const year = blockedDate.start_datetime.getFullYear();
+              const month = String(blockedDate.start_datetime.getMonth() + 1).padStart(2, '0');
+              const day = String(blockedDate.start_datetime.getDate()).padStart(2, '0');
+              const hours = String(blockedDate.start_datetime.getHours()).padStart(2, '0');
+              const minutes = String(blockedDate.start_datetime.getMinutes()).padStart(2, '0');
+              const seconds = String(blockedDate.start_datetime.getSeconds()).padStart(2, '0');
+              startDateTime = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+            } else {
+              startDateTime = blockedDate.start_datetime;
+            }
+          }
+          
+          if (blockedDate.end_datetime) {
+            if (typeof blockedDate.end_datetime === 'string' && blockedDate.end_datetime.includes('T')) {
+              // Remove timezone info if present and keep just YYYY-MM-DDTHH:MM:SS format
+              endDateTime = blockedDate.end_datetime.split('.')[0].replace('Z', '');
+            } else if (blockedDate.end_datetime instanceof Date) {
+              // For Date objects, format without timezone
+              const year = blockedDate.end_datetime.getFullYear();
+              const month = String(blockedDate.end_datetime.getMonth() + 1).padStart(2, '0');
+              const day = String(blockedDate.end_datetime.getDate()).padStart(2, '0');
+              const hours = String(blockedDate.end_datetime.getHours()).padStart(2, '0');
+              const minutes = String(blockedDate.end_datetime.getMinutes()).padStart(2, '0');
+              const seconds = String(blockedDate.end_datetime.getSeconds()).padStart(2, '0');
+              endDateTime = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+            } else {
+              endDateTime = blockedDate.end_datetime;
+            }
+          }
+          
+          return {
+            id: blockedDate.id,
+            type: 'blocked',
+            startDate: startDateTime,
+            endDate: endDateTime,
+            reason: blockedDate.reason || ''
+          };
+        } catch (err) {
+          console.error('Error formatting blocked date:', err, 'for record:', blockedDate);
+          return {
+            id: blockedDate.id,
+            type: 'blocked',
+            startDate: null,
+            endDate: null,
+            reason: blockedDate.reason || 'Error parsing date/time'
+          };
+        }
+      });
       
       res.status(200).json({
         status: 'success',
@@ -942,23 +995,82 @@ const hostController = {
         });
       }
       
-      // Validate dates
-      const startDate = new Date(start_date);
-      const endDate = new Date(end_date);
-      
-      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      // Normalize dates to avoid timezone issues (same as availability dates)
+      let normalizedStartDate, normalizedEndDate;
+      try {
+        // Handle start_date
+        if (!start_date || typeof start_date !== 'string') {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid start date format'
+          });
+        }
+        
+        // Normalize start_date to YYYY-MM-DD format
+        if (/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
+          normalizedStartDate = start_date;
+        } else if (start_date.includes('T')) {
+          normalizedStartDate = start_date.split('T')[0];
+        } else {
+          const testDate = new Date(start_date + 'T12:00:00');
+          if (isNaN(testDate.getTime())) {
+            return res.status(400).json({
+              status: 'error',
+              message: 'Invalid start date format'
+            });
+          }
+          const year = testDate.getFullYear();
+          const month = String(testDate.getMonth() + 1).padStart(2, '0');
+          const day = String(testDate.getDate()).padStart(2, '0');
+          normalizedStartDate = `${year}-${month}-${day}`;
+        }
+        
+        // Handle end_date
+        if (!end_date || typeof end_date !== 'string') {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid end date format'
+          });
+        }
+        
+        // Normalize end_date to YYYY-MM-DD format
+        if (/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+          normalizedEndDate = end_date;
+        } else if (end_date.includes('T')) {
+          normalizedEndDate = end_date.split('T')[0];
+        } else {
+          const testDate = new Date(end_date + 'T12:00:00');
+          if (isNaN(testDate.getTime())) {
+            return res.status(400).json({
+              status: 'error',
+              message: 'Invalid end date format'
+            });
+          }
+          const year = testDate.getFullYear();
+          const month = String(testDate.getMonth() + 1).padStart(2, '0');
+          const day = String(testDate.getDate()).padStart(2, '0');
+          normalizedEndDate = `${year}-${month}-${day}`;
+        }
+        
+        // Validate that start date is before end date
+        if (normalizedStartDate > normalizedEndDate) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Start date must be before end date'
+          });
+        }
+      } catch (err) {
         return res.status(400).json({
           status: 'error',
-          message: 'Invalid date format'
+          message: 'Invalid date format: ' + err.message
         });
       }
       
-      if (startDate > endDate) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Start date must be before end date'
-        });
-      }
+      // Create datetime strings in the same format as availability dates (no timezone)
+      const startDateTime = `${normalizedStartDate}T00:00:00`;
+      const endDateTime = `${normalizedEndDate}T23:59:59`;
+      
+
       
       // Check for conflicts with existing bookings
       const bookings = await db.query(`
@@ -969,7 +1081,7 @@ const hostController = {
           (start_datetime <= ? AND end_datetime >= ?) OR
           (start_datetime >= ? AND end_datetime <= ?)
         )
-      `, [listingId, startDate, startDate, endDate, endDate, startDate, endDate]);
+      `, [listingId, startDateTime, startDateTime, endDateTime, endDateTime, startDateTime, endDateTime]);
       
       if (bookings.length > 0) {
         return res.status(400).json({
@@ -979,9 +1091,9 @@ const hostController = {
       }
       
       // Check if we're blocking multiple days
-      const startDay = new Date(startDate).setHours(0, 0, 0, 0);
-      const endDay = new Date(endDate).setHours(0, 0, 0, 0);
-      const dayDiff = Math.floor((endDay - startDay) / (24 * 60 * 60 * 1000));
+      const startDateObj = new Date(normalizedStartDate + 'T12:00:00'); // Use noon to avoid timezone issues
+      const endDateObj = new Date(normalizedEndDate + 'T12:00:00');
+      const dayDiff = Math.floor((endDateObj.getTime() - startDateObj.getTime()) / (24 * 60 * 60 * 1000));
       
       // If we're blocking multiple days, create separate entries for each day
       if (dayDiff > 0) {
@@ -994,28 +1106,17 @@ const hostController = {
         try {
           // For each day in the range
           for (let i = 0; i <= dayDiff; i++) {
-            const currentDate = new Date(startDay);
-            currentDate.setDate(currentDate.getDate() + i);
+            // Calculate current date by adding days to start date
+            const currentDateObj = new Date(startDateObj);
+            currentDateObj.setDate(currentDateObj.getDate() + i);
+            const year = currentDateObj.getFullYear();
+            const month = String(currentDateObj.getMonth() + 1).padStart(2, '0');
+            const day = String(currentDateObj.getDate()).padStart(2, '0');
+            const currentDateStr = `${year}-${month}-${day}`;
             
-            let currentStartTime, currentEndTime;
-            
-            // For first day, use the provided start time
-            if (i === 0) {
-              currentStartTime = startDate;
-            } else {
-              // For other days, start at midnight
-              currentStartTime = new Date(currentDate);
-              currentStartTime.setHours(0, 0, 0, 0);
-            }
-            
-            // For last day, use the provided end time
-            if (i === dayDiff) {
-              currentEndTime = endDate;
-            } else {
-              // For other days, end at 23:59:59
-              currentEndTime = new Date(currentDate);
-              currentEndTime.setHours(23, 59, 59, 999);
-            }
+            // Create datetime strings for this day
+            const currentStartTime = `${currentDateStr}T00:00:00`;
+            const currentEndTime = `${currentDateStr}T23:59:59`;
             
             // Add blocked date for this day
             const [result] = await connection.query(
@@ -1054,7 +1155,7 @@ const hostController = {
         // Just blocking a single day or time range within a day
         const result = await db.query(
           'INSERT INTO blocked_dates (listing_id, start_datetime, end_datetime, reason) VALUES (?, ?, ?, ?)',
-          [listingId, startDate, endDate, reason || null]
+          [listingId, startDateTime, endDateTime, reason || null]
         );
         
         // Get created blocked date
@@ -1155,7 +1256,7 @@ const hostController = {
         }
         
         // Get availability settings
-        const availability = await db.query(
+        const availabilityResults = await db.query(
           'SELECT * FROM availability WHERE listing_id = ? ORDER BY date ASC, start_time ASC',
           [listingId]
         );
@@ -1167,6 +1268,18 @@ const hostController = {
         );
         
         const mode = availabilityMode?.availability_mode || 'available-by-default';
+        
+        // Format dates to YYYY-MM-DD format without timezone
+        const availability = availabilityResults.map(item => {
+          // Extract just the date part in YYYY-MM-DD format
+          const dateObj = new Date(item.date);
+          const formattedDate = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+          
+          return {
+            ...item,
+            date: formattedDate
+          };
+        });
         
         res.status(200).json({
           status: 'success',
@@ -1206,26 +1319,84 @@ const hostController = {
           });
         }
         
-        // Validate date and times
-        const availabilityDate = new Date(date);
-        if (isNaN(availabilityDate.getTime())) {
+        // Validate and normalize date without timezone conversion
+        let normalizedDate;
+        try {
+          // Handle the date string directly to avoid timezone issues
+          if (!date || typeof date !== 'string') {
+            return res.status(400).json({
+              status: 'error',
+              message: 'Invalid date format'
+            });
+          }
+          
+          // If date is already in YYYY-MM-DD format, use it directly
+          if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            normalizedDate = date;
+          } else if (date.includes('T')) {
+            // If date includes time, extract just the date part
+            normalizedDate = date.split('T')[0];
+          } else {
+            // Try to parse and reformat
+            const testDate = new Date(date + 'T12:00:00'); // Add noon to avoid timezone issues
+            if (isNaN(testDate.getTime())) {
+              return res.status(400).json({
+                status: 'error',
+                message: 'Invalid date format'
+              });
+            }
+            const year = testDate.getFullYear();
+            const month = String(testDate.getMonth() + 1).padStart(2, '0');
+            const day = String(testDate.getDate()).padStart(2, '0');
+            normalizedDate = `${year}-${month}-${day}`;
+          }
+        } catch (err) {
           return res.status(400).json({
             status: 'error',
-            message: 'Invalid date format'
+            message: 'Invalid date format: ' + err.message
           });
         }
         
         // Check if this is a recurring availability
+        let normalizedEndDate;
         if (recurring && end_date) {
-          const endRecurringDate = new Date(end_date);
-          if (isNaN(endRecurringDate.getTime())) {
+          try {
+            // Handle the end date string directly to avoid timezone issues
+            if (!end_date || typeof end_date !== 'string') {
+              return res.status(400).json({
+                status: 'error',
+                message: 'Invalid end date format for recurring availability'
+              });
+            }
+            
+            // If end date is already in YYYY-MM-DD format, use it directly
+            if (/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+              normalizedEndDate = end_date;
+            } else if (end_date.includes('T')) {
+              // If date includes time, extract just the date part
+              normalizedEndDate = end_date.split('T')[0];
+            } else {
+              // Try to parse and reformat
+              const testDate = new Date(end_date + 'T12:00:00'); // Add noon to avoid timezone issues
+              if (isNaN(testDate.getTime())) {
+                return res.status(400).json({
+                  status: 'error',
+                  message: 'Invalid end date format for recurring availability'
+                });
+              }
+              const year = testDate.getFullYear();
+              const month = String(testDate.getMonth() + 1).padStart(2, '0');
+              const day = String(testDate.getDate()).padStart(2, '0');
+              normalizedEndDate = `${year}-${month}-${day}`;
+            }
+          } catch (err) {
             return res.status(400).json({
               status: 'error',
-              message: 'Invalid end date format for recurring availability'
+              message: 'Invalid end date format: ' + err.message
             });
           }
           
-          if (endRecurringDate < availabilityDate) {
+          if (normalizedEndDate < normalizedDate) {
             return res.status(400).json({
               status: 'error',
               message: 'End date must be after start date for recurring availability'
@@ -1283,7 +1454,11 @@ const hostController = {
             
             // Add availability for each date
             for (const currentDate of dates) {
-              const formattedDate = currentDate.toISOString().split('T')[0];
+              // Convert each date to YYYY-MM-DD format avoiding timezone shifts
+              const year = currentDate.getFullYear();
+              const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+              const day = String(currentDate.getDate()).padStart(2, '0');
+              const formattedDate = `${year}-${month}-${day}`;
               
               // Check if there's an existing availability for this date and time
               const [existingAvailability] = await connection.query(
@@ -1338,7 +1513,8 @@ const hostController = {
           }
         } else {
           // Single date availability
-          const formattedDate = availabilityDate.toISOString().split('T')[0];
+          // Use the normalized date string directly to avoid any timezone conversion
+          const formattedDate = normalizedDate; // Already normalized to YYYY-MM-DD format above
           
           // Check if there's an existing availability for this date and time
           const [existingAvailability] = await db.query(

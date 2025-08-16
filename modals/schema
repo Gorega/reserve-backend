@@ -96,7 +96,7 @@ CREATE TABLE bookings (
     user_id INT NOT NULL,
     start_datetime DATETIME NOT NULL,
     end_datetime DATETIME NOT NULL,
-    booking_type ENUM('hourly', 'daily', 'session', 'appointment', 'subscription') DEFAULT 'hourly',
+    booking_type ENUM('hourly', 'daily', 'night', 'appointment', 'subscription') DEFAULT 'hourly',
     guests_count INT DEFAULT 1,
     total_price DECIMAL(10,2) NOT NULL,
     deposit_amount DECIMAL(10,2) DEFAULT 0,

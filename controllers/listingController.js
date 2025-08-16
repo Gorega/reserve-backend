@@ -36,11 +36,9 @@ const listingController = {
       // Handle date filters
       if (req.query.start_date) {
         filters.start_date = req.query.start_date;
-        console.log(`Start date filter: ${req.query.start_date}`);
       }
       if (req.query.end_date) {
         filters.end_date = req.query.end_date;
-        console.log(`End date filter: ${req.query.end_date}`);
       }
       
       // Handle boolean filters
@@ -84,9 +82,7 @@ const listingController = {
       if (req.query.sort_by) {
         filters.sort_by = req.query.sort_by;
       }
-      
-      console.log('Applying filters:', filters);
-      
+            
       // Get listings
       const listings = await listingModel.getAll(filters, page, limit);
       
@@ -194,6 +190,36 @@ const listingController = {
         });
       }
       
+      // Process pricing_details if provided
+      if (listingData.pricing_details) {
+        try {
+          // If pricing_details is a string, parse it
+          if (typeof listingData.pricing_details === 'string') {
+            listingData.pricing_details = JSON.parse(listingData.pricing_details);
+          }
+          
+          // Extract legacy pricing fields for backward compatibility
+          const hourPrice = listingData.pricing_details.find(p => p.unit_type === 'hour');
+          const dayPrice = listingData.pricing_details.find(p => p.unit_type === 'day');
+          const nightPrice = listingData.pricing_details.find(p => p.unit_type === 'night');
+          
+          if (hourPrice) listingData.price_per_hour = parseFloat(hourPrice.price);
+          if (dayPrice) listingData.price_per_day = parseFloat(dayPrice.price);
+          if (nightPrice) listingData.price_per_half_night = parseFloat(nightPrice.price);
+          
+          // Set unit_type based on first pricing option if not already set
+          if (!listingData.unit_type && listingData.pricing_details.length > 0) {
+            listingData.unit_type = listingData.pricing_details[0].unit_type;
+          }
+        } catch (error) {
+          console.error('Error processing pricing details:', error);
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid pricing details format'
+          });
+        }
+      }
+      
       if (!listingData.category_id) {
         return res.status(400).json({
           status: 'error',
@@ -262,6 +288,33 @@ const listingController = {
         return next(badRequest('You do not own this listing'));
       }
       
+      // Process pricing_details if provided
+      if (listingData.pricing_details) {
+        try {
+          // If pricing_details is a string, parse it
+          if (typeof listingData.pricing_details === 'string') {
+            listingData.pricing_details = JSON.parse(listingData.pricing_details);
+          }
+          
+          // Extract legacy pricing fields for backward compatibility
+          const hourPrice = listingData.pricing_details.find(p => p.unit_type === 'hour');
+          const dayPrice = listingData.pricing_details.find(p => p.unit_type === 'day');
+          const nightPrice = listingData.pricing_details.find(p => p.unit_type === 'night');
+          
+          if (hourPrice) listingData.price_per_hour = parseFloat(hourPrice.price);
+          if (dayPrice) listingData.price_per_day = parseFloat(dayPrice.price);
+          if (nightPrice) listingData.price_per_half_night = parseFloat(nightPrice.price);
+          
+          // Set unit_type based on first pricing option if not already set
+          if (!listingData.unit_type && listingData.pricing_details.length > 0) {
+            listingData.unit_type = listingData.pricing_details[0].unit_type;
+          }
+        } catch (error) {
+          console.error('Error processing pricing details:', error);
+          return next(badRequest('Invalid pricing details format'));
+        }
+      }
+      
       // Start a transaction
       const connection = await db.getPool().getConnection();
       await connection.beginTransaction();
@@ -269,7 +322,6 @@ const listingController = {
       try {
         // Handle photo deletions first
         if (listingData.photos_to_delete && listingData.photos_to_delete.length > 0) {
-          console.log('Deleting photos:', listingData.photos_to_delete);
           
           // Get photo URLs before deleting
           const photosToDelete = await connection.query(
@@ -282,7 +334,6 @@ const listingController = {
             try {
               // Extract public_id from Cloudinary URL
               const publicId = photo.image_url.split('/').slice(-1)[0].split('.')[0];
-              console.log('Deleting from Cloudinary:', publicId);
               await deleteFile(publicId);
             } catch (error) {
               console.error('Error deleting photo from Cloudinary:', error);
@@ -406,9 +457,7 @@ const listingController = {
   async addPhotos(req, res, next) {
     try {
       const { id } = req.params;
-      
-      console.log(`Adding photos to listing ${id}`);
-      
+            
       // Check if user owns the listing
       const listing = await listingModel.getById(id);
       if (!listing) {
@@ -421,22 +470,17 @@ const listingController = {
       
       // Check if files are uploaded
       if (!req.files || req.files.length === 0) {
-        console.log('No photos uploaded in request');
         return next(badRequest('No photos uploaded'));
       }
-      
-      console.log(`Found ${req.files.length} uploaded files`);
-      
+            
       const addedPhotos = [];
       
       // Add each photo
       for (const file of req.files) {
-        console.log(`Processing file: ${file.originalname}, saved as ${file.filename}`);
         
         try {
           // Upload to Cloudinary
           const cloudinaryResult = await uploadToCloudinary(file.path);
-          console.log(`Uploaded to Cloudinary: ${cloudinaryResult.secure_url}`);
           
           // Add to database with Cloudinary URL
           const photo = await listingModel.addPhoto(id, cloudinaryResult.secure_url);
@@ -454,7 +498,6 @@ const listingController = {
         return next(serverError('Failed to add any photos'));
       }
       
-      console.log(`Successfully added ${addedPhotos.length} photos`);
       
       res.status(201).json({
         status: 'success',
@@ -485,9 +528,7 @@ const listingController = {
   async deletePhoto(req, res, next) {
     try {
       const { id, photoId } = req.params;
-      
-      console.log(`Deleting photo ${photoId} from listing ${id}`);
-      
+            
       // Check if user owns the listing
       const listing = await listingModel.getById(id);
       if (!listing) {
@@ -529,9 +570,7 @@ const listingController = {
   async setCoverPhoto(req, res, next) {
     try {
       const { id, photoId } = req.params;
-      
-      console.log(`Setting photo ${photoId} as cover for listing ${id}`);
-      
+            
       // Check if user owns the listing
       const listing = await listingModel.getById(id);
       if (!listing) {
@@ -599,9 +638,7 @@ const listingController = {
           message: 'Start and end datetime are required'
         });
       }
-      
-      console.log(`Checking availability for listing ${id} from ${start_datetime} to ${end_datetime}`);
-      
+            
       const isAvailable = await listingModel.checkAvailability(id, start_datetime, end_datetime);
       
       res.status(200).json({
