@@ -184,10 +184,7 @@ const listingController = {
       
       // Validate required fields
       if (!listingData.listing_type) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Listing type is required'
-        });
+        return next(badRequest('Listing type is required'));
       }
       
       // Process pricing_details if provided
@@ -213,18 +210,23 @@ const listingController = {
           }
         } catch (error) {
           console.error('Error processing pricing details:', error);
-          return res.status(400).json({
-            status: 'error',
-            message: 'Invalid pricing details format'
-          });
+          return next(badRequest('Invalid pricing details format'));
         }
       }
       
       if (!listingData.category_id) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Category is required'
-        });
+        return next(badRequest('Category is required'));
+      }
+      
+      // Validate cancellation policy
+      if (listingData.cancellation_policy) {
+        const validPolicies = ['flexible', 'moderate', 'strict', 'non_refundable'];
+        if (!validPolicies.includes(listingData.cancellation_policy)) {
+          return next(badRequest('Invalid cancellation policy'));
+        }
+      } else {
+        // Set default cancellation policy if not provided
+        listingData.cancellation_policy = 'moderate';
       }
       
       // Handle photos if files are uploaded
@@ -259,6 +261,8 @@ const listingController = {
         data: listing
       });
     } catch (error) {
+      console.error('Error creating listing:', error);
+      
       // Clean up uploaded files if there was an error
       if (req.files && req.files.length > 0) {
         req.files.forEach(file => {
@@ -267,6 +271,16 @@ const listingController = {
           }
         });
       }
+      
+      // Handle specific errors
+      if (error.code === 'ER_NO_SUCH_TABLE') {
+        return next(serverError('Database table not found'));
+      } else if (error.code === 'ER_BAD_FIELD_ERROR') {
+        return next(serverError('Invalid database field'));
+      } else if (error.message && error.message.includes('cancellation_policy')) {
+        return next(badRequest('Invalid cancellation policy'));
+      }
+      
       next(error);
     }
   },
