@@ -52,6 +52,8 @@ const reportRoutes = require('./routes/reportRoutes');
 const listingFeaturesRoutes = require('./routes/listingFeaturesRoutes');
 const blockedDatesRoutes = require('./routes/blockedDatesRoutes');
 const cancellationPolicyRoutes = require('./routes/cancellationPolicyRoutes');
+const pricingOptionRoutes = require('./routes/pricingOptionRoutes');
+const specialPricingRoutes = require('./routes/specialPricingRoutes');
 
 // Create Express app
 const app = express();
@@ -133,6 +135,7 @@ app.use((req, res, next) => {
 // API routes
 app.use('/api/users', userRoutes);
 app.use('/api/listings', listingRoutes);
+app.use('/api/listings/:listingId/pricing-options', pricingOptionRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/payments', paymentRoutes);
@@ -146,6 +149,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/listing-features', listingFeaturesRoutes);
 app.use('/api/blocked-dates', blockedDatesRoutes);
 app.use('/api/cancellation-policies', cancellationPolicyRoutes);
+app.use('/api/special-pricing', specialPricingRoutes);
 
 // Root route
 app.get('/', (req, res) => {
@@ -183,4 +187,4 @@ server.listen(PORT, () => {
   console.log(`Uploads directory: ${path.join(__dirname, uploadDir)}`);
 });
 
-module.exports = { app, server, io }; // For testing purposes 
+module.exports = { app, server, io }; // For testing purposes

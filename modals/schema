@@ -27,7 +27,7 @@ CREATE TABLE listings (
     price_per_hour DECIMAL(10,2),
     price_per_day DECIMAL(10,2),
     price_per_half_night DECIMAL(10,2),
-    unit_type ENUM('hour', 'day', 'session', 'night') DEFAULT 'hour',
+    unit_type ENUM('hour', 'day', 'session', 'night', 'week', 'month') DEFAULT 'hour',
     is_hourly BOOLEAN DEFAULT TRUE,
     location TEXT,
     latitude DECIMAL(10,6),
@@ -40,6 +40,23 @@ CREATE TABLE listings (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (category_id) REFERENCES categories(id)
+);
+
+-- New table for pricing options
+CREATE TABLE pricing_options (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id INT NOT NULL,
+    price DECIMAL(10,2) NOT NULL,
+    unit_type ENUM('hour', 'day', 'night', 'week', 'month', 'session') NOT NULL,
+    duration INT NOT NULL DEFAULT 1,
+    minimum_units INT NOT NULL DEFAULT 1,
+    maximum_units INT NULL,
+    is_default BOOLEAN DEFAULT FALSE,
+    description VARCHAR(255) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    INDEX idx_pricing_options_listing_id (listing_id)
 );
 
 CREATE TABLE listing_photos (
@@ -109,10 +126,13 @@ CREATE TABLE bookings (
     deposit_deadline DATETIME,
     auto_cancel_at DATETIME,
     notes TEXT,
+    pricing_option_id INT NULL,
+    units_booked INT DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (listing_id) REFERENCES listings(id),
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (pricing_option_id) REFERENCES pricing_options(id)
 );
 
 CREATE TABLE payments (
@@ -305,6 +325,25 @@ CREATE TABLE cancellation_policies (
     refund_after_percentage INT NOT NULL
 );
 
+-- Special pricing table for date-specific and recurring pricing
+CREATE TABLE special_pricing (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id INT NOT NULL,
+    date DATE NULL,
+    price DECIMAL(10,2) NOT NULL,
+    pricing_option ENUM('per_hour', 'per_day', 'per_night') NOT NULL,
+    reason VARCHAR(255),
+    is_recurring BOOLEAN DEFAULT FALSE,
+    day_of_week ENUM('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday') NULL,
+    start_date DATE NULL,
+    end_date DATE NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    INDEX idx_special_pricing_listing_date (listing_id, date),
+    INDEX idx_special_pricing_listing_recurring (listing_id, is_recurring, day_of_week)
+);
+
 -- Add service-specific fields for different categories
 CREATE TABLE service_details (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -396,12 +435,12 @@ INSERT INTO categories (name, translated_name, parent_id) VALUES
 ('BMW', '{"ar": "بي إم دبليو", "he": "בי.מ.וו"}', 2),
 ('Mercedes-Benz', '{"ar": "مرسيدس-بنز", "he": "מרצדס-בנץ"}', 2),
 ('Audi', '{"ar": "أودي", "he": "אאודי"}', 2),
-('Volkswagen', '{"ar": "فولكס فاجن", "he": "פולקסווגן"}', 2),
+('Volkswagen', '{"ar": "فولكس فاجن", "he": "פולקסווגן"}', 2),
 ('Nissan', '{"ar": "نيسان", "he": "ניסאן"}', 2),
 ('Hyundai', '{"ar": "هيونداي", "he": "יונדאי"}', 2),
 ('Kia', '{"ar": "كيا", "he": "קיה"}', 2),
-('Chevrolet', '{"ar": "شيفרوלייה", "he": "שברולט"}', 2),
-('Tesla', '{"ar": "تسלה", "he": "טסלה"}', 2);
+('Chevrolet', '{"ar": "شيفرولييه", "he": "שברולט"}', 2),
+('Tesla', '{"ar": "تسلا", "he": "טסלה"}', 2);
 
 -- Service subcategories (parent_id = 3)
 INSERT INTO categories (name, translated_name, parent_id) VALUES 

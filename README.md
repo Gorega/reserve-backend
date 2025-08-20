@@ -1,235 +1,121 @@
-# Reservation System Backend
+# Reservation Backend
 
-A powerful and flexible reservation system backend built with Node.js, Express, and MySQL.
+This is the backend API for the reservation system.
 
-## Features
+## Setup
 
-- User authentication and authorization
-- Listing management with photos and availability
-- Booking system with payment processing
-- Reviews and messaging
-- Category management
-- Provider payouts
-- Wishlists
+1. Clone the repository
+2. Install dependencies: `npm install`
+3. Copy `.env.example` to `.env` and update the values
+4. Start the server: `npm start`
 
-## Tech Stack
+## Database Migrations
 
-- **Node.js** - JavaScript runtime
-- **Express** - Web framework
-- **MySQL** - Database
-- **JWT** - Authentication
-- **Bcrypt** - Password hashing
-- **Multer** - File uploads
+The system includes an automatic database migration system that runs migrations on application startup. Migrations are SQL files stored in the `utils/migrations` directory.
 
-## Project Structure
+### How Migrations Work
 
-```
-reserve-backend/
-├── src/
-│   ├── config/          # Configuration files
-│   ├── controllers/     # Request handlers
-│   ├── middleware/      # Express middleware
-│   ├── models/          # Database models
-│   ├── routes/          # API routes
-│   ├── utils/           # Utility functions
-│   └── server.js        # Entry point
-├── uploads/             # Uploaded files
-├── .env                 # Environment variables
-├── package.json         # Dependencies
-└── README.md            # Documentation
-```
+1. When the server starts, it automatically runs any pending migrations
+2. Migrations are tracked in a `migrations` table in the database
+3. Only migrations that haven't been run before will be executed
+4. When creating or updating listings, required migrations (like pricing details) are automatically ensured
 
-## Getting Started
+### Creating New Migrations
 
-### Prerequisites
+To create a new migration:
 
-- Node.js (v14 or higher)
-- MySQL (v5.7 or higher)
+1. Create a new SQL file in the `utils/migrations` directory with a descriptive name (e.g., `add_new_column.sql`)
+2. Write your SQL statements in the file, separating multiple statements with semicolons
+3. The migration will be automatically run on the next server startup
 
-### Installation
+### Running Migrations Manually
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/reserve-backend.git
-   cd reserve-backend
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Create a `.env` file based on `env.example`:
-   ```bash
-   cp env.example .env
-   ```
-
-4. Update the `.env` file with your MySQL credentials and other configuration.
-
-5. Create the MySQL database:
-   ```sql
-   CREATE DATABASE reservation_db;
-   ```
-
-6. Import the database schema:
-   ```bash
-   mysql -u your_username -p reservation_db < modals/schema
-   ```
-
-7. Start the server:
-   ```bash
-   npm run dev
-   ```
-
-## Socket.io Integration
-
-The backend now includes Socket.io for real-time messaging and notifications. Here's how to use it in your frontend:
-
-### Connecting to Socket.io
+If you need to run migrations manually:
 
 ```javascript
-import { io } from 'socket.io-client';
+// Run all pending migrations
+const migrationService = require('./utils/migrations/migrationService');
+await migrationService.runPendingMigrations();
 
-// Connect to the socket server with authentication
-const socket = io('http://your-api-url', {
-  auth: {
-    token: 'your-jwt-token' // The same JWT token used for API authentication
-  }
-});
-
-// Handle connection events
-socket.on('connect', () => {
-  console.log('Connected to socket server');
-});
-
-socket.on('connect_error', (error) => {
-  console.error('Socket connection error:', error.message);
-});
+// Run a specific migration
+await migrationService.runMigration('migration_file_name.sql');
 ```
 
-### Messaging Features
+## API Documentation
 
-```javascript
-// Join a conversation with another user
-function joinConversation(userId) {
-  socket.emit('join_conversation', userId);
-}
+### Endpoints
 
-// Leave a conversation
-function leaveConversation(userId) {
-  socket.emit('leave_conversation', userId);
-}
-
-// Listen for new messages
-socket.on('new_message', (message) => {
-  console.log('New message received:', message);
-  // Update your UI with the new message
-});
-
-// Listen for read receipts
-socket.on('messages_read', (data) => {
-  console.log('Messages read by:', data.readBy);
-  // Update your UI to show messages as read
-});
-```
-
-### Notifications
-
-```javascript
-// Listen for notifications
-socket.on('notification', (notification) => {
-  console.log('New notification:', notification);
-  
-  // Handle different notification types
-  switch(notification.type) {
-    case 'new_message':
-      // Show message notification
-      showMessageNotification(notification.data);
-      break;
-    // Handle other notification types
-    default:
-      console.log('Unknown notification type:', notification.type);
-  }
-});
-
-// Example notification handler
-function showMessageNotification(data) {
-  // Show a browser notification or in-app notification
-  if (Notification.permission === 'granted') {
-    new Notification('New Message', {
-      body: `You have a new message from ${data.senderId}`,
-      icon: '/path/to/icon.png'
-    });
-  }
-  
-  // Update unread message count in UI
-  updateUnreadCount();
-}
-
-// Function to get unread message count
-async function updateUnreadCount() {
-  const response = await fetch('/api/messages/unread-count', {
-    headers: {
-      'Authorization': `Bearer ${yourAuthToken}`
-    }
-  });
-  const data = await response.json();
-  // Update UI with unread count
-  document.getElementById('unread-badge').textContent = data.data.unreadCount;
-}
-```
-
-## API Endpoints
-
-### Authentication
+#### Authentication
 - `POST /api/users/register` - Register a new user
-- `POST /api/users/login` - Login user
+- `POST /api/users/login` - Login a user
+- `GET /api/users/me` - Get current user
 
-### Users
-- `GET /api/users/profile` - Get current user profile
-- `PUT /api/users/profile` - Update current user profile
-- `GET /api/users` - Get all users
-- `GET /api/users/:id` - Get user by ID
-- `PUT /api/users/:id` - Update user
-- `DELETE /api/users/:id` - Delete user
-
-### Categories
-- `GET /api/categories` - Get all categories
-- `GET /api/categories/:id` - Get category by ID
-- `GET /api/categories/:id/listings` - Get listings by category
-- `POST /api/categories` - Create a new category (Admin)
-- `PUT /api/categories/:id` - Update a category (Admin)
-- `DELETE /api/categories/:id` - Delete a category (Admin)
-
-### Listings
+#### Listings
 - `GET /api/listings` - Get all listings
 - `GET /api/listings/:id` - Get listing by ID
-- `POST /api/listings` - Create a new listing (Provider)
-- `PUT /api/listings/:id` - Update a listing (Owner)
-- `DELETE /api/listings/:id` - Delete a listing (Owner)
-- `POST /api/listings/:id/photos` - Add photos to a listing (Owner)
-- `DELETE /api/listings/:id/photos/:photoId` - Delete a photo (Owner)
-- `PUT /api/listings/:id/photos/:photoId/cover` - Set cover photo (Owner)
-- `POST /api/listings/:id/check-availability` - Check availability
-- `POST /api/listings/:id/availability` - Add availability (Owner)
+- `POST /api/listings` - Create a new listing
+- `PUT /api/listings/:id` - Update a listing
+- `DELETE /api/listings/:id` - Delete a listing
 
-### Bookings
-- `GET /api/bookings` - Get all bookings for the user
+#### Bookings
+- `GET /api/bookings` - Get all bookings
 - `GET /api/bookings/:id` - Get booking by ID
 - `POST /api/bookings` - Create a new booking
 - `PUT /api/bookings/:id` - Update a booking
-- `POST /api/bookings/:id/cancel` - Cancel a booking
-- `POST /api/bookings/:id/complete` - Complete a booking (Provider)
-- `POST /api/bookings/:id/payment` - Process payment for a booking
+- `DELETE /api/bookings/:id` - Cancel a booking
 
-## License
+#### Categories
+- `GET /api/categories` - Get all categories
+- `GET /api/categories/:id` - Get category by ID
+- `POST /api/categories` - Create a new category
+- `PUT /api/categories/:id` - Update a category
+- `DELETE /api/categories/:id` - Delete a category
 
-This project is licensed under the MIT License.
+#### Messages
+- `GET /api/messages` - Get all messages
+- `GET /api/messages/:id` - Get message by ID
+- `POST /api/messages` - Create a new message
+- `PUT /api/messages/:id` - Update a message
+- `DELETE /api/messages/:id` - Delete a message
 
-## Acknowledgements
+## Error Handling
 
-- [Express](https://expressjs.com/)
-- [MySQL](https://www.mysql.com/)
-- [JWT](https://jwt.io/)
-- [Bcrypt](https://github.com/kelektiv/node.bcrypt.js)
-- [Multer](https://github.com/expressjs/multer) 
+The API uses standard HTTP status codes:
+
+- `200` - Success
+- `201` - Created
+- `400` - Bad Request
+- `401` - Unauthorized
+- `403` - Forbidden
+- `404` - Not Found
+- `500` - Server Error
+
+Error responses have the following format:
+
+```json
+{
+  "status": "error",
+  "statusCode": 400,
+  "message": "Error message"
+}
+```
+
+## Authentication
+
+The API uses JWT for authentication. Include the token in the Authorization header:
+
+```
+Authorization: Bearer <token>
+```
+
+## File Uploads
+
+The API supports file uploads for listing photos. Use multipart/form-data to upload files.
+
+## WebSockets
+
+The API includes WebSocket support for real-time messaging.
+
+## Environment Variables
+
+See `.env.example` for required environment variables.

@@ -1,7 +1,10 @@
 const listingModel = require('../models/listingModel');
+const pricingOptionModel = require('../models/pricingOptionModel');
+const specialPricingModel = require('../models/specialPricingModel');
 const { serverError, notFound, badRequest } = require('../utils/errorHandler');
 const { getFileUrl, deleteFile, uploadToCloudinary } = require('../utils/fileUpload');
 const db = require('../config/database');
+const smartPricingUtils = require('../utils/smartPricingUtils');
 
 /**
  * Listing Controller
@@ -124,6 +127,36 @@ const listingController = {
   },
   
   /**
+   * Get effective price for a listing on a specific date
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getEffectivePrice(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { date, pricing_option_id } = req.query;
+      
+      if (!date) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Date parameter is required'
+        });
+      }
+      
+      const specialPricingModel = require('../models/specialPricingModel');
+      const effectivePrice = await specialPricingModel.getEffectivePrice(id, date, pricing_option_id);
+      
+      res.status(200).json({
+        status: 'success',
+        data: effectivePrice
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+  
+  /**
    * Get all main categories (parent_id is NULL)
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
@@ -187,31 +220,97 @@ const listingController = {
         return next(badRequest('Listing type is required'));
       }
       
-      // Process pricing_details if provided
-      if (listingData.pricing_details) {
-        try {
-          // If pricing_details is a string, parse it
-          if (typeof listingData.pricing_details === 'string') {
-            listingData.pricing_details = JSON.parse(listingData.pricing_details);
+      // Process pricing options if provided
+      if (listingData.pricing_options) {
+        if (!Array.isArray(listingData.pricing_options)) {
+          try {
+            listingData.pricing_options = JSON.parse(listingData.pricing_options);
+          } catch (error) {
+            return next(badRequest('Invalid pricing options format'));
           }
-          
-          // Extract legacy pricing fields for backward compatibility
-          const hourPrice = listingData.pricing_details.find(p => p.unit_type === 'hour');
-          const dayPrice = listingData.pricing_details.find(p => p.unit_type === 'day');
-          const nightPrice = listingData.pricing_details.find(p => p.unit_type === 'night');
-          
-          if (hourPrice) listingData.price_per_hour = parseFloat(hourPrice.price);
-          if (dayPrice) listingData.price_per_day = parseFloat(dayPrice.price);
-          if (nightPrice) listingData.price_per_half_night = parseFloat(nightPrice.price);
-          
-          // Set unit_type based on first pricing option if not already set
-          if (!listingData.unit_type && listingData.pricing_details.length > 0) {
-            listingData.unit_type = listingData.pricing_details[0].unit_type;
-          }
-        } catch (error) {
-          console.error('Error processing pricing details:', error);
-          return next(badRequest('Invalid pricing details format'));
         }
+        
+        // Validate pricing options
+        if (!Array.isArray(listingData.pricing_options) || listingData.pricing_options.length === 0) {
+          return next(badRequest('At least one pricing option is required'));
+        }
+        
+        // Clean up pricing options to ensure proper format
+        listingData.pricing_options = listingData.pricing_options.map(option => {
+          // Remove any client-side string IDs that might cause database issues
+          const cleanOption = {...option};
+          if (cleanOption.id && typeof cleanOption.id === 'string') {
+            delete cleanOption.id;
+          }
+          
+          return {
+            ...cleanOption,
+            price: parseFloat(cleanOption.price),
+            unit_type: cleanOption.unit_type,
+            duration: parseInt(cleanOption.duration) || 1,
+            is_default: Boolean(cleanOption.is_default),
+            minimum_units: parseInt(cleanOption.minimum_units) || 1
+          };
+        });
+        
+        // Ensure at least one option is marked as default
+        if (!listingData.pricing_options.some(option => option.is_default)) {
+          listingData.pricing_options[0].is_default = true;
+        }
+        
+        // Set legacy fields for backward compatibility
+        const hourOption = listingData.pricing_options.find(p => p.unit_type === 'hour');
+        const dayOption = listingData.pricing_options.find(p => p.unit_type === 'day');
+        const nightOption = listingData.pricing_options.find(p => p.unit_type === 'night');
+        
+        if (hourOption) listingData.price_per_hour = parseFloat(hourOption.price);
+        if (dayOption) listingData.price_per_day = parseFloat(dayOption.price);
+        if (nightOption) listingData.price_per_half_night = parseFloat(nightOption.price);
+        
+        // Set default unit_type if not provided
+        if (!listingData.unit_type) {
+          const defaultOption = listingData.pricing_options.find(p => p.is_default);
+          listingData.unit_type = defaultOption ? defaultOption.unit_type : 
+            listingData.pricing_options[0].unit_type;
+        }
+      } 
+      // Create pricing options from legacy fields if not provided
+      else if (listingData.price_per_hour || listingData.price_per_day || listingData.price_per_half_night) {
+        listingData.pricing_options = [];
+        
+        if (listingData.price_per_hour) {
+          listingData.pricing_options.push({
+            price: parseFloat(listingData.price_per_hour),
+            unit_type: 'hour',
+            duration: 1,
+            is_default: listingData.unit_type === 'hour' || !listingData.unit_type
+          });
+        }
+        
+        if (listingData.price_per_day) {
+          listingData.pricing_options.push({
+            price: parseFloat(listingData.price_per_day),
+            unit_type: 'day',
+            duration: 1,
+            is_default: listingData.unit_type === 'day'
+          });
+        }
+        
+        if (listingData.price_per_half_night) {
+          listingData.pricing_options.push({
+            price: parseFloat(listingData.price_per_half_night),
+            unit_type: 'night',
+            duration: 1,
+            is_default: listingData.unit_type === 'night'
+          });
+        }
+        
+        // Set default unit_type if not provided
+        if (!listingData.unit_type && listingData.pricing_options.length > 0) {
+          listingData.unit_type = listingData.pricing_options[0].unit_type;
+        }
+      } else {
+        return next(badRequest('At least one pricing option is required'));
       }
       
       if (!listingData.category_id) {
@@ -256,6 +355,68 @@ const listingController = {
       // Create listing
       const listing = await listingModel.create(listingData);
       
+      // Handle special pricing if provided
+      if (listingData.special_pricing && Array.isArray(listingData.special_pricing) && listingData.special_pricing.length > 0) {
+        try {
+          for (const specialPricingItem of listingData.special_pricing) {
+            // Set listing ID for the special pricing
+            specialPricingItem.listing_id = listing.id;
+            
+            // Find the corresponding pricing option ID from the created listing
+            if (specialPricingItem.pricing_option_id && typeof specialPricingItem.pricing_option_id === 'string') {
+              // If it's a client-side ID, find the actual pricing option
+              const pricingOptions = await pricingOptionModel.getByListingId(listing.id);
+              const matchingOption = pricingOptions.find(option => 
+                option.unit_type === (listingData.pricing_options.find(p => p.id === specialPricingItem.pricing_option_id)?.unit_type)
+              );
+              if (matchingOption) {
+                specialPricingItem.pricing_option_id = matchingOption.id;
+              }
+            }
+            
+            // Convert pricing_option to valid ENUM value
+            let pricingOption = 'per_hour'; // default
+            if (specialPricingItem.pricing_option_id) {
+              // Use pricing_option_id to determine the correct ENUM value
+              if (specialPricingItem.pricing_option_id === 1 || specialPricingItem.pricing_option_id === 'hour') {
+                pricingOption = 'per_hour';
+              } else if (specialPricingItem.pricing_option_id === 2 || specialPricingItem.pricing_option_id === 'day') {
+                pricingOption = 'per_day';
+              } else if (specialPricingItem.pricing_option_id === 3 || specialPricingItem.pricing_option_id === 'night') {
+                pricingOption = 'per_night';
+              }
+            } else if (specialPricingItem.pricing_option) {
+              // Handle direct ENUM values or convert from unit_type
+              const option = specialPricingItem.pricing_option.toLowerCase();
+              if (option === 'per_hour' || option === 'hour') {
+                pricingOption = 'per_hour';
+              } else if (option === 'per_day' || option === 'day') {
+                pricingOption = 'per_day';
+              } else if (option === 'per_night' || option === 'night') {
+                pricingOption = 'per_night';
+              }
+            }
+
+            // Create the special pricing entry with correct column mapping
+             const specialPricingData = {
+               listing_id: specialPricingItem.listing_id,
+               price: specialPricingItem.special_price || specialPricingItem.price,
+               pricing_option: pricingOption,
+               date: specialPricingItem.specific_date || specialPricingItem.date || null,
+               day_of_week: specialPricingItem.day_of_week || null,
+               is_recurring: specialPricingItem.is_recurring || false,
+               start_date: specialPricingItem.recurring_start_date || specialPricingItem.start_date || null,
+               end_date: specialPricingItem.recurring_end_date || specialPricingItem.end_date || null,
+               reason: specialPricingItem.reason || ''
+             };
+             await specialPricingModel.create(specialPricingData);
+          }
+        } catch (specialPricingError) {
+          console.error('Error creating special pricing:', specialPricingError);
+          // Don't fail the entire request if special pricing fails
+        }
+      }
+      
       res.status(201).json({
         status: 'success',
         data: listing
@@ -294,7 +455,16 @@ const listingController = {
   async update(req, res, next) {
     try {
       const { id } = req.params;
-      const listingData = req.body;
+      let listingData = req.body;
+      
+      // Handle pricing_options if it's a string (from JSON.stringify)
+      if (listingData.pricing_options && typeof listingData.pricing_options === 'string') {
+        try {
+          listingData.pricing_options = JSON.parse(listingData.pricing_options);
+        } catch (e) {
+          console.error('Error parsing pricing_options:', e);
+        }
+      }
       
       // Check if user owns the listing
       const listing = await listingModel.getById(id);
@@ -302,30 +472,94 @@ const listingController = {
         return next(badRequest('You do not own this listing'));
       }
       
-      // Process pricing_details if provided
-      if (listingData.pricing_details) {
-        try {
-          // If pricing_details is a string, parse it
-          if (typeof listingData.pricing_details === 'string') {
-            listingData.pricing_details = JSON.parse(listingData.pricing_details);
+      // Process pricing options if provided
+      if (listingData.pricing_options) {
+        if (!Array.isArray(listingData.pricing_options)) {
+          try {
+            listingData.pricing_options = JSON.parse(listingData.pricing_options);
+          } catch (error) {
+            return next(badRequest('Invalid pricing options format'));
+          }
+        }
+        
+        // Validate pricing options
+        if (!Array.isArray(listingData.pricing_options) || listingData.pricing_options.length === 0) {
+          return next(badRequest('At least one pricing option is required'));
+        }
+        
+        // Clean up pricing options to ensure proper format
+        listingData.pricing_options = listingData.pricing_options.map(option => {
+          // Remove any client-side string IDs that might cause database issues
+          const cleanOption = {...option};
+          if (cleanOption.id && typeof cleanOption.id === 'string') {
+            delete cleanOption.id;
           }
           
-          // Extract legacy pricing fields for backward compatibility
-          const hourPrice = listingData.pricing_details.find(p => p.unit_type === 'hour');
-          const dayPrice = listingData.pricing_details.find(p => p.unit_type === 'day');
-          const nightPrice = listingData.pricing_details.find(p => p.unit_type === 'night');
-          
-          if (hourPrice) listingData.price_per_hour = parseFloat(hourPrice.price);
-          if (dayPrice) listingData.price_per_day = parseFloat(dayPrice.price);
-          if (nightPrice) listingData.price_per_half_night = parseFloat(nightPrice.price);
-          
-          // Set unit_type based on first pricing option if not already set
-          if (!listingData.unit_type && listingData.pricing_details.length > 0) {
-            listingData.unit_type = listingData.pricing_details[0].unit_type;
-          }
-        } catch (error) {
-          console.error('Error processing pricing details:', error);
-          return next(badRequest('Invalid pricing details format'));
+          return {
+            ...cleanOption,
+            price: parseFloat(cleanOption.price),
+            unit_type: cleanOption.unit_type,
+            duration: parseInt(cleanOption.duration) || 1,
+            is_default: Boolean(cleanOption.is_default),
+            minimum_units: parseInt(cleanOption.minimum_units) || 1
+          };
+        });
+        
+        // Ensure at least one option is marked as default
+        if (!listingData.pricing_options.some(option => option.is_default)) {
+          listingData.pricing_options[0].is_default = true;
+        }
+        
+        // Set legacy fields for backward compatibility
+        const hourOption = listingData.pricing_options.find(p => p.unit_type === 'hour');
+        const dayOption = listingData.pricing_options.find(p => p.unit_type === 'day');
+        const nightOption = listingData.pricing_options.find(p => p.unit_type === 'night');
+        
+        if (hourOption) listingData.price_per_hour = parseFloat(hourOption.price);
+        if (dayOption) listingData.price_per_day = parseFloat(dayOption.price);
+        if (nightOption) listingData.price_per_half_night = parseFloat(nightOption.price);
+        
+        // Set default unit_type if not provided
+        if (!listingData.unit_type) {
+          const defaultOption = listingData.pricing_options.find(p => p.is_default);
+          listingData.unit_type = defaultOption ? defaultOption.unit_type : 
+            listingData.pricing_options[0].unit_type;
+        }
+      } 
+      // Create pricing options from legacy fields if provided but no pricing_options
+      else if (listingData.price_per_hour || listingData.price_per_day || listingData.price_per_half_night) {
+        listingData.pricing_options = [];
+        
+        if (listingData.price_per_hour) {
+          listingData.pricing_options.push({
+            price: parseFloat(listingData.price_per_hour),
+            unit_type: 'hour',
+            duration: 1,
+            is_default: listingData.unit_type === 'hour' || !listingData.unit_type
+          });
+        }
+        
+        if (listingData.price_per_day) {
+          listingData.pricing_options.push({
+            price: parseFloat(listingData.price_per_day),
+            unit_type: 'day',
+            duration: 1,
+            is_default: listingData.unit_type === 'day'
+          });
+        }
+        
+        if (listingData.price_per_half_night) {
+          listingData.pricing_options.push({
+            price: parseFloat(listingData.price_per_half_night),
+            unit_type: 'night',
+            duration: 1,
+            is_default: listingData.unit_type === 'night'
+          });
+        }
+        
+        // Set default unit_type if not provided
+        if (!listingData.unit_type && listingData.pricing_options.length > 0) {
+          listingData.unit_type = listingData.pricing_options[0].unit_type;
         }
       }
       
@@ -346,9 +580,16 @@ const listingController = {
           // Delete photos from Cloudinary
           for (const photo of photosToDelete) {
             try {
+              // Check if image_url exists and is a valid string
+              if (photo && photo.image_url && typeof photo.image_url === 'string') {
               // Extract public_id from Cloudinary URL
-              const publicId = photo.image_url.split('/').slice(-1)[0].split('.')[0];
+                const urlParts = photo.image_url.split('/');
+                if (urlParts.length > 0) {
+                  const fileNameWithExt = urlParts[urlParts.length - 1];
+                  const publicId = fileNameWithExt.split('.')[0];
               await deleteFile(publicId);
+                }
+              }
             } catch (error) {
               console.error('Error deleting photo from Cloudinary:', error);
             }
@@ -401,7 +642,350 @@ const listingController = {
           }
         }
         
-        const updatedListing = await listingModel.update(id, listingData);
+        // Handle the update directly here instead of calling listingModel.update
+        // This avoids nested transactions which can cause lock timeouts
+        
+        // Create a clean object with only valid listing table fields
+        const validListingFields = [
+          'user_id', 'category_id', 'listing_type', 'title', 'description',
+          'price_per_hour', 'price_per_day', 'price_per_half_night', 'unit_type',
+          'is_hourly', 'location', 'latitude', 'longitude', 'instant_booking',
+          'cancellation_policy', 'active'
+        ];
+        
+        // Extract only the fields that belong in the listings table
+        const mainListingData = {};
+        for (const field of validListingFields) {
+          if (listingData[field] !== undefined) {
+            mainListingData[field] = listingData[field];
+          }
+        }
+        
+        // These fields are already excluded by using the validListingFields approach
+        
+        // Update main listing data
+        if (Object.keys(mainListingData).length > 0) {
+          await connection.query(
+            'UPDATE listings SET ? WHERE id = ?',
+            [mainListingData, id]
+          );
+        }
+        
+        // Update pricing options if provided
+        if (listingData.pricing_options && Array.isArray(listingData.pricing_options)) {
+          await pricingOptionModel.createMultiple(id, listingData.pricing_options, connection);
+        }
+        
+        // Handle property details if this is a property listing
+        if (listingData.listing_type === 'property') {
+          const propertyDetails = listingData.property_details ? { ...listingData.property_details } : {};
+          
+          // Add individual property fields that might be at the root level
+          if (listingData.property_type) propertyDetails.property_type = listingData.property_type;
+          if (listingData.max_guests) propertyDetails.max_guests = listingData.max_guests;
+          if (listingData.bedrooms) propertyDetails.bedrooms = listingData.bedrooms;
+          if (listingData.beds) propertyDetails.beds = listingData.beds;
+          if (listingData.bathrooms) propertyDetails.bathrooms = listingData.bathrooms;
+          if (listingData.room_type) propertyDetails.room_type = listingData.room_type;
+          if (listingData.min_nights) propertyDetails.min_nights = listingData.min_nights;
+          if (listingData.max_nights) propertyDetails.max_nights = listingData.max_nights;
+          
+          // Check if property details exist
+          const [existingPropertyDetails] = await connection.query(
+            'SELECT listing_id FROM listing_property_details WHERE listing_id = ?',
+            [id]
+          );
+          
+          if (Object.keys(propertyDetails).length > 0) {
+            if (existingPropertyDetails.length > 0) {
+              // Update existing property details
+              await connection.query(
+                'UPDATE listing_property_details SET ? WHERE listing_id = ?',
+                [propertyDetails, id]
+              );
+            } else {
+              // Insert new property details
+              await connection.query(
+                'INSERT INTO listing_property_details SET ?',
+                [{ ...propertyDetails, listing_id: id }]
+              );
+            }
+          }
+        }
+        
+        // Handle amenities if provided
+        if (listingData.amenities && Array.isArray(listingData.amenities)) {
+          // Delete existing amenities
+          await connection.query('DELETE FROM listing_amenities WHERE listing_id = ?', [id]);
+          
+          // Insert new amenities
+          if (listingData.amenities.length > 0) {
+            for (const amenityId of listingData.amenities) {
+              await connection.query(
+                'INSERT INTO listing_amenities (listing_id, amenity_id) VALUES (?, ?)',
+                [id, amenityId]
+              );
+            }
+          }
+        }
+        
+        // Handle house rules if provided
+        if (listingData.house_rules && Array.isArray(listingData.house_rules)) {
+          // Delete existing house rules
+          await connection.query('DELETE FROM listing_house_rules WHERE listing_id = ?', [id]);
+          
+          // Insert new house rules
+          if (listingData.house_rules.length > 0) {
+            for (const rule of listingData.house_rules) {
+              await connection.query(
+                'INSERT INTO listing_house_rules (listing_id, rule_id, allowed, description) VALUES (?, ?, ?, ?)',
+                [id, rule.rule_id, rule.allowed ? 1 : 0, rule.description || null]
+              );
+            }
+          }
+        }
+        
+        // Handle safety features if provided
+        if (listingData.safety_features && Array.isArray(listingData.safety_features)) {
+          // Delete existing safety features
+          await connection.query('DELETE FROM listing_safety_features WHERE listing_id = ?', [id]);
+          
+          // Insert new safety features
+          if (listingData.safety_features.length > 0) {
+            for (const featureId of listingData.safety_features) {
+              await connection.query(
+                'INSERT INTO listing_safety_features (listing_id, feature_id) VALUES (?, ?)',
+                [id, featureId]
+              );
+            }
+          }
+        }
+        
+        // Handle vehicle details if this is a vehicle listing
+        if (listingData.listing_type === 'vehicle') {
+          const carDetails = listingData.car_details ? { ...listingData.car_details } : {};
+          
+          // Add individual car fields that might be at the root level
+          if (listingData.brand) carDetails.brand = listingData.brand;
+          if (listingData.model) carDetails.model = listingData.model;
+          if (listingData.year) carDetails.year = parseInt(listingData.year);
+          if (listingData.transmission) carDetails.transmission = listingData.transmission;
+          if (listingData.seats) carDetails.seats = parseInt(listingData.seats);
+          if (listingData.fuel_type) carDetails.fuel_type = listingData.fuel_type;
+          if (listingData.mileage) carDetails.mileage = parseInt(listingData.mileage);
+          
+          // Check if car details exist
+          const [existingCarDetails] = await connection.query(
+            'SELECT listing_id FROM listing_car_details WHERE listing_id = ?',
+            [id]
+          );
+          
+          if (Object.keys(carDetails).length > 0) {
+            if (existingCarDetails.length > 0) {
+              // Update existing car details
+              await connection.query(
+                'UPDATE listing_car_details SET ? WHERE listing_id = ?',
+                [carDetails, id]
+              );
+            } else {
+              // Insert new car details
+              await connection.query(
+                'INSERT INTO listing_car_details SET ?',
+                [{ ...carDetails, listing_id: id }]
+              );
+            }
+          }
+        }
+        
+        // Handle service details if this is a service listing
+        if (listingData.listing_type === 'service') {
+          const serviceDetails = listingData.service_details ? { ...listingData.service_details } : {};
+          
+          // Add individual service fields that might be at the root level
+          if (listingData.service_type) serviceDetails.service_type = listingData.service_type;
+          if (listingData.service_duration) serviceDetails.service_duration = parseInt(listingData.service_duration);
+          if (listingData.preparation_time) serviceDetails.preparation_time = parseInt(listingData.preparation_time);
+          if (listingData.cleanup_time) serviceDetails.cleanup_time = parseInt(listingData.cleanup_time);
+          if (listingData.brings_equipment !== undefined) serviceDetails.brings_equipment = listingData.brings_equipment;
+          if (listingData.remote_service !== undefined) serviceDetails.remote_service = listingData.remote_service;
+          if (listingData.experience_years) serviceDetails.experience_years = parseInt(listingData.experience_years);
+          if (listingData.appointment_required !== undefined) serviceDetails.appointment_required = listingData.appointment_required;
+          
+          // Check if service details exist
+          const [existingServiceDetails] = await connection.query(
+            'SELECT listing_id FROM service_details WHERE listing_id = ?',
+            [id]
+          );
+          
+          if (Object.keys(serviceDetails).length > 0) {
+            if (existingServiceDetails.length > 0) {
+              // Update existing service details
+              await connection.query(
+                'UPDATE service_details SET ? WHERE listing_id = ?',
+                [serviceDetails, id]
+              );
+            } else {
+              // Insert new service details
+              await connection.query(
+                'INSERT INTO service_details SET ?',
+                [{ ...serviceDetails, listing_id: id }]
+              );
+            }
+          }
+        }
+        
+        // Handle subscription details if this is a subscription listing
+        if (listingData.listing_type === 'subscription') {
+          const subscriptionDetails = listingData.subscription_details ? { ...listingData.subscription_details } : {};
+          
+          // Add individual subscription fields that might be at the root level
+          if (listingData.subscription_type) subscriptionDetails.subscription_type = listingData.subscription_type;
+          if (listingData.duration_days) subscriptionDetails.duration_days = parseInt(listingData.duration_days);
+          if (listingData.recurring !== undefined) subscriptionDetails.recurring = listingData.recurring;
+          if (listingData.includes_trainer !== undefined) subscriptionDetails.includes_trainer = listingData.includes_trainer;
+          if (listingData.includes_classes !== undefined) subscriptionDetails.includes_classes = listingData.includes_classes;
+          if (listingData.max_visits_per_week) subscriptionDetails.max_visits_per_week = parseInt(listingData.max_visits_per_week);
+          
+          // Check if subscription details exist
+          const [existingSubscriptionDetails] = await connection.query(
+            'SELECT listing_id FROM listing_subscription_details WHERE listing_id = ?',
+            [id]
+          );
+          
+          if (Object.keys(subscriptionDetails).length > 0) {
+            if (existingSubscriptionDetails.length > 0) {
+              // Update existing subscription details
+              await connection.query(
+                'UPDATE listing_subscription_details SET ? WHERE listing_id = ?',
+                [subscriptionDetails, id]
+              );
+            } else {
+              // Insert new subscription details
+              await connection.query(
+                'INSERT INTO listing_subscription_details SET ?',
+                [{ ...subscriptionDetails, listing_id: id }]
+              );
+            }
+          }
+        }
+        
+        // Handle venue details if this is a venue listing
+        if (listingData.listing_type === 'venue') {
+          const venueDetails = listingData.venue_details ? { ...listingData.venue_details } : {};
+          
+          // Add individual venue fields that might be at the root level
+          if (listingData.venue_type) venueDetails.venue_type = listingData.venue_type;
+          if (listingData.max_capacity) venueDetails.max_capacity = parseInt(listingData.max_capacity);
+          if (listingData.indoor_space_sqm) venueDetails.indoor_space_sqm = parseFloat(listingData.indoor_space_sqm);
+          if (listingData.outdoor_space_sqm) venueDetails.outdoor_space_sqm = parseFloat(listingData.outdoor_space_sqm);
+          if (listingData.has_catering !== undefined) venueDetails.has_catering = listingData.has_catering;
+          if (listingData.has_parking !== undefined) venueDetails.has_parking = listingData.has_parking;
+          if (listingData.has_sound_system !== undefined) venueDetails.has_sound_system = listingData.has_sound_system;
+          if (listingData.has_stage !== undefined) venueDetails.has_stage = listingData.has_stage;
+          
+          // Check if venue details exist
+          const [existingVenueDetails] = await connection.query(
+            'SELECT listing_id FROM listing_venue_details WHERE listing_id = ?',
+            [id]
+          );
+          
+          if (Object.keys(venueDetails).length > 0) {
+            if (existingVenueDetails.length > 0) {
+              // Update existing venue details
+              await connection.query(
+                'UPDATE listing_venue_details SET ? WHERE listing_id = ?',
+                [venueDetails, id]
+              );
+            } else {
+              // Insert new venue details
+              await connection.query(
+                'INSERT INTO listing_venue_details SET ?',
+                [{ ...venueDetails, listing_id: id }]
+              );
+            }
+          }
+        }
+        
+        // Handle special pricing if provided
+        if (listingData.special_pricing && Array.isArray(listingData.special_pricing)) {
+          try {
+            // First, delete existing special pricing for this listing
+            await connection.query(
+              'DELETE FROM special_pricing WHERE listing_id = ?',
+              [id]
+            );
+            
+            // Then create new special pricing entries
+            if (listingData.special_pricing.length > 0) {
+              for (const specialPricingItem of listingData.special_pricing) {
+                // Set listing ID for the special pricing
+                specialPricingItem.listing_id = id;
+                
+                // Find the corresponding pricing option ID from the updated listing
+                if (specialPricingItem.pricing_option_id && typeof specialPricingItem.pricing_option_id === 'string') {
+                  // If it's a client-side ID, find the actual pricing option
+                  const [pricingOptionRows] = await connection.query(
+                    'SELECT * FROM pricing_options WHERE listing_id = ?',
+                    [id]
+                  );
+                  const matchingOption = pricingOptionRows.find(option => 
+                    option.unit_type === (listingData.pricing_options?.find(p => p.id === specialPricingItem.pricing_option_id)?.unit_type)
+                  );
+                  if (matchingOption) {
+                    specialPricingItem.pricing_option_id = matchingOption.id;
+                  }
+                }
+                
+                // Convert pricing_option to valid ENUM value
+                let pricingOption = 'per_hour'; // default
+                if (specialPricingItem.pricing_option_id) {
+                  // Use pricing_option_id to determine the correct ENUM value
+                  if (specialPricingItem.pricing_option_id === 1 || specialPricingItem.pricing_option_id === 'hour') {
+                    pricingOption = 'per_hour';
+                  } else if (specialPricingItem.pricing_option_id === 2 || specialPricingItem.pricing_option_id === 'day') {
+                    pricingOption = 'per_day';
+                  } else if (specialPricingItem.pricing_option_id === 3 || specialPricingItem.pricing_option_id === 'night') {
+                    pricingOption = 'per_night';
+                  }
+                } else if (specialPricingItem.pricing_option) {
+                  // Handle direct ENUM values or convert from unit_type
+                  const option = specialPricingItem.pricing_option.toLowerCase();
+                  if (option === 'per_hour' || option === 'hour') {
+                    pricingOption = 'per_hour';
+                  } else if (option === 'per_day' || option === 'day') {
+                    pricingOption = 'per_day';
+                  } else if (option === 'per_night' || option === 'night') {
+                    pricingOption = 'per_night';
+                  }
+                }
+
+                // Create the special pricing entry
+                const specialPricingData = {
+                  listing_id: specialPricingItem.listing_id,
+                  price: specialPricingItem.special_price || specialPricingItem.price,
+                  pricing_option: pricingOption,
+                  date: specialPricingItem.specific_date || specialPricingItem.date || null,
+                  day_of_week: specialPricingItem.day_of_week || null,
+                  is_recurring: specialPricingItem.is_recurring || false,
+                  start_date: specialPricingItem.recurring_start_date || specialPricingItem.start_date || null,
+                  end_date: specialPricingItem.recurring_end_date || specialPricingItem.end_date || null,
+                  reason: specialPricingItem.reason || ''
+                };
+                await specialPricingModel.create(specialPricingData, connection);
+              }
+            }
+          } catch (specialPricingError) {
+            console.error('Error updating special pricing:', specialPricingError);
+            // Don't fail the entire request if special pricing fails
+          }
+        }
+        
+        // Get the updated listing
+        const [updatedListingRows] = await connection.query(
+          'SELECT * FROM listings WHERE id = ?',
+          [id]
+        );
+        const updatedListing = updatedListingRows[0];
         
         // Commit transaction
         await connection.commit();
@@ -712,7 +1296,77 @@ const listingController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  /**
+   * Calculate smart pricing for a listing
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async calculateSmartPricing(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { start_datetime, end_datetime, unit_type } = req.body;
+
+      if (!start_datetime || !end_datetime) {
+        return next(badRequest('Start and end datetime are required'));
+      }
+
+      // Get listing with pricing options
+      const listing = await listingModel.getById(id);
+
+      const startDate = new Date(start_datetime);
+      const endDate = new Date(end_datetime);
+
+      if (startDate >= endDate) {
+        return next(badRequest('End datetime must be after start datetime'));
+      }
+
+      // Calculate smart pricing
+      const smartPricing = smartPricingUtils.calculateSmartPrice(
+        listing, 
+        startDate, 
+        endDate, 
+        unit_type
+      );
+
+      // Apply special pricing if available
+      const bookingModel = require('../models/bookingModel');
+      const finalPrice = await bookingModel.calculatePriceWithSpecialPricing(
+        id,
+        startDate,
+        endDate,
+        smartPricing
+      );
+
+      // Calculate confirmation fee (10%)
+      const confirmationFeePercent = 10;
+      const confirmationFee = finalPrice * (confirmationFeePercent / 100);
+
+      res.status(200).json({
+        status: 'success',
+        data: {
+          pricingOption: smartPricing.pricingOption,
+          unitsNeeded: smartPricing.unitsNeeded,
+          totalUnits: smartPricing.totalUnits,
+          basePrice: finalPrice,
+          confirmationFee,
+          totalPrice: finalPrice,
+          pricePerUnit: smartPricing.pricePerUnit,
+          unitType: smartPricing.unitType,
+          duration: smartPricing.duration,
+          minimumUnits: smartPricing.minimumUnits,
+          maximumUnits: smartPricing.maximumUnits,
+          effectiveDuration: smartPricing.effectiveDuration,
+          constraints: smartPricingUtils.getDurationConstraints(smartPricing.pricingOption)
+        }
+      });
+    } catch (error) {
+      console.error('Error calculating smart pricing:', error);
+      next(error);
+    }
   }
 };
 
-module.exports = listingController; 
+module.exports = listingController;

@@ -33,6 +33,19 @@ router.get(
 );
 
 /**
+ * @route   GET /api/listings/:id/effective-price
+ * @desc    Get effective price for a listing on a specific date
+ * @access  Public
+ * @query   date (required), pricing_option_id (optional)
+ */
+router.get(
+  '/:id/effective-price',
+  idParamValidation,
+  validate,
+  listingController.getEffectivePrice
+);
+
+/**
  * @route   POST /api/listings
  * @desc    Create a new listing
  * @access  Private/Provider
@@ -181,4 +194,16 @@ router.post(
   listingController.addAvailability
 );
 
-module.exports = router; 
+/**
+ * @route   POST /api/listings/:id/calculate-pricing
+ * @desc    Calculate smart pricing for a listing
+ * @access  Public
+ */
+router.post(
+  '/:id/calculate-pricing',
+  idParamValidation,
+  validate,
+  listingController.calculateSmartPricing
+);
+
+module.exports = router;

@@ -100,35 +100,153 @@ const listingValidationRules = {
     body('instant_booking').optional().isBoolean().withMessage('Instant booking must be a boolean value'),
     body('cancellation_policy')
       .optional()
-      .isIn(['flexible', 'moderate', 'strict', 'non_refundable'])
-      .withMessage('Invalid cancellation policy'),
+      .custom(value => {
+        if (!value) return true;
+        const validPolicies = ['flexible', 'moderate', 'strict', 'non_refundable'];
+        if (validPolicies.includes(value)) return true;
+        throw new Error('Invalid cancellation policy');
+      }),
     
     // Property details validation (for accommodations)
     body('property_details.max_guests').optional().isInt({ min: 1 }).withMessage('Maximum guests must be at least 1'),
     body('property_details.bedrooms').optional().isInt({ min: 0 }).withMessage('Bedrooms must be a non-negative integer'),
     body('property_details.beds').optional().isInt({ min: 1 }).withMessage('Beds must be at least 1'),
     body('property_details.bathrooms').optional().isFloat({ min: 0 }).withMessage('Bathrooms must be a non-negative number'),
-    body('property_details.property_type').optional().notEmpty().withMessage('Property type cannot be empty'),
-    body('property_details.room_type').optional().notEmpty().withMessage('Room type cannot be empty'),
+    body('property_details.property_type')
+      .optional()
+      .custom(value => {
+        if (!value) return true;
+        return true;
+      }),
+    body('property_details.room_type')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        return true;
+      }),
     body('property_details.min_nights').optional().isInt({ min: 1 }).withMessage('Minimum nights must be at least 1'),
-    body('property_details.max_nights').optional().isInt({ min: 1 }).withMessage('Maximum nights must be at least 1'),
+    body('property_details.max_nights')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined) return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 1) {
+          throw new Error('Maximum nights must be at least 1');
+        }
+        return true;
+      }),
     
     // Car details validation (for car rentals)
-    body('car_details.brand').optional().notEmpty().withMessage('Car brand cannot be empty'),
-    body('car_details.model').optional().notEmpty().withMessage('Car model cannot be empty'),
-    body('car_details.year').optional().isInt({ min: 1900, max: new Date().getFullYear() + 1 }).withMessage('Invalid car year'),
-    body('car_details.transmission').optional().isIn(['automatic', 'manual']).withMessage('Invalid transmission type'),
-    body('car_details.seats').optional().isInt({ min: 1 }).withMessage('Seats must be at least 1'),
-    body('car_details.fuel_type').optional().notEmpty().withMessage('Fuel type cannot be empty'),
-    body('car_details.mileage').optional().isInt({ min: 0 }).withMessage('Mileage must be a non-negative integer'),
+    body('car_details.brand')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        return true;
+      }),
+    body('car_details.model')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        return true;
+      }),
+    body('car_details.year')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        const currentYear = new Date().getFullYear();
+        if (isNaN(numValue) || numValue < 1900 || numValue > currentYear + 1) {
+          throw new Error('Invalid car year');
+        }
+        return true;
+      }),
+    body('car_details.transmission')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        if (['automatic', 'manual'].includes(value)) return true;
+        throw new Error('Invalid transmission type');
+      }),
+    body('car_details.seats')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 1) {
+          throw new Error('Seats must be at least 1');
+        }
+        return true;
+      }),
+    body('car_details.fuel_type')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        return true;
+      }),
+    body('car_details.mileage')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 0) {
+          throw new Error('Mileage must be a non-negative integer');
+        }
+        return true;
+      }),
     
     // Service details validation (for services)
-    body('service_details.service_duration').optional().isInt({ min: 1 }).withMessage('Service duration must be at least 1 minute'),
-    body('service_details.preparation_time').optional().isInt({ min: 0 }).withMessage('Preparation time must be a non-negative integer'),
-    body('service_details.cleanup_time').optional().isInt({ min: 0 }).withMessage('Cleanup time must be a non-negative integer'),
-    body('service_details.brings_equipment').optional().isBoolean().withMessage('Brings equipment must be a boolean value'),
-    body('service_details.remote_service').optional().isBoolean().withMessage('Remote service must be a boolean value'),
-    body('service_details.experience_years').optional().isInt({ min: 0 }).withMessage('Experience years must be a non-negative integer')
+    body('service_details.service_duration')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 1) {
+          throw new Error('Service duration must be at least 1 minute');
+        }
+        return true;
+      }),
+    body('service_details.preparation_time')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 0) {
+          throw new Error('Preparation time must be a non-negative integer');
+        }
+        return true;
+      }),
+    body('service_details.cleanup_time')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 0) {
+          throw new Error('Cleanup time must be a non-negative integer');
+        }
+        return true;
+      }),
+    body('service_details.brings_equipment')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined) return true;
+        return true;
+      }),
+    body('service_details.remote_service')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined) return true;
+        return true;
+      }),
+    body('service_details.experience_years')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 0) {
+          throw new Error('Experience years must be a non-negative integer');
+        }
+        return true;
+      })
   ],
   update: [
     body('title').optional().trim().notEmpty().withMessage('Title cannot be empty'),
@@ -145,8 +263,12 @@ const listingValidationRules = {
     body('instant_booking').optional().isBoolean().withMessage('Instant booking must be a boolean value'),
     body('cancellation_policy')
       .optional()
-      .isIn(['flexible', 'moderate', 'strict', 'non_refundable'])
-      .withMessage('Invalid cancellation policy'),
+      .custom(value => {
+        if (!value) return true;
+        const validPolicies = ['flexible', 'moderate', 'strict', 'non_refundable'];
+        if (validPolicies.includes(value)) return true;
+        throw new Error('Invalid cancellation policy');
+      }),
     body('active').optional().isBoolean().withMessage('Active must be a boolean value'),
     
     // Property details validation (for accommodations)
@@ -154,27 +276,141 @@ const listingValidationRules = {
     body('property_details.bedrooms').optional().isInt({ min: 0 }).withMessage('Bedrooms must be a non-negative integer'),
     body('property_details.beds').optional().isInt({ min: 1 }).withMessage('Beds must be at least 1'),
     body('property_details.bathrooms').optional().isFloat({ min: 0 }).withMessage('Bathrooms must be a non-negative number'),
-    body('property_details.property_type').optional().notEmpty().withMessage('Property type cannot be empty'),
-    body('property_details.room_type').optional().notEmpty().withMessage('Room type cannot be empty'),
+    body('property_details.property_type')
+      .optional()
+      .custom(value => {
+        if (!value) return true;
+        return true;
+      }),
+    body('property_details.room_type')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        return true;
+      }),
     body('property_details.min_nights').optional().isInt({ min: 1 }).withMessage('Minimum nights must be at least 1'),
-    body('property_details.max_nights').optional().isInt({ min: 1 }).withMessage('Maximum nights must be at least 1'),
+    body('property_details.max_nights')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined) return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 1) {
+          throw new Error('Maximum nights must be at least 1');
+        }
+        return true;
+      }),
     
     // Car details validation (for car rentals)
-    body('car_details.brand').optional().notEmpty().withMessage('Car brand cannot be empty'),
-    body('car_details.model').optional().notEmpty().withMessage('Car model cannot be empty'),
-    body('car_details.year').optional().isInt({ min: 1900, max: new Date().getFullYear() + 1 }).withMessage('Invalid car year'),
-    body('car_details.transmission').optional().isIn(['automatic', 'manual']).withMessage('Invalid transmission type'),
-    body('car_details.seats').optional().isInt({ min: 1 }).withMessage('Seats must be at least 1'),
-    body('car_details.fuel_type').optional().notEmpty().withMessage('Fuel type cannot be empty'),
-    body('car_details.mileage').optional().isInt({ min: 0 }).withMessage('Mileage must be a non-negative integer'),
+    body('car_details.brand')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        return true;
+      }),
+    body('car_details.model')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        return true;
+      }),
+    body('car_details.year')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        const currentYear = new Date().getFullYear();
+        if (isNaN(numValue) || numValue < 1900 || numValue > currentYear + 1) {
+          throw new Error('Invalid car year');
+        }
+        return true;
+      }),
+    body('car_details.transmission')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        if (['automatic', 'manual'].includes(value)) return true;
+        throw new Error('Invalid transmission type');
+      }),
+    body('car_details.seats')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 1) {
+          throw new Error('Seats must be at least 1');
+        }
+        return true;
+      }),
+    body('car_details.fuel_type')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        return true;
+      }),
+    body('car_details.mileage')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 0) {
+          throw new Error('Mileage must be a non-negative integer');
+        }
+        return true;
+      }),
     
     // Service details validation (for services)
-    body('service_details.service_duration').optional().isInt({ min: 1 }).withMessage('Service duration must be at least 1 minute'),
-    body('service_details.preparation_time').optional().isInt({ min: 0 }).withMessage('Preparation time must be a non-negative integer'),
-    body('service_details.cleanup_time').optional().isInt({ min: 0 }).withMessage('Cleanup time must be a non-negative integer'),
-    body('service_details.brings_equipment').optional().isBoolean().withMessage('Brings equipment must be a boolean value'),
-    body('service_details.remote_service').optional().isBoolean().withMessage('Remote service must be a boolean value'),
-    body('service_details.experience_years').optional().isInt({ min: 0 }).withMessage('Experience years must be a non-negative integer')
+    body('service_details.service_duration')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 1) {
+          throw new Error('Service duration must be at least 1 minute');
+        }
+        return true;
+      }),
+    body('service_details.preparation_time')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 0) {
+          throw new Error('Preparation time must be a non-negative integer');
+        }
+        return true;
+      }),
+    body('service_details.cleanup_time')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 0) {
+          throw new Error('Cleanup time must be a non-negative integer');
+        }
+        return true;
+      }),
+    body('service_details.brings_equipment')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined) return true;
+        return true;
+      }),
+    body('service_details.remote_service')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined) return true;
+        return true;
+      }),
+    body('service_details.experience_years')
+      .optional()
+      .custom(value => {
+        if (value === null || value === undefined || value === '') return true;
+        const numValue = parseInt(value);
+        if (isNaN(numValue) || numValue < 0) {
+          throw new Error('Experience years must be a non-negative integer');
+        }
+        return true;
+      })
   ]
 };
 

@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { notFound, badRequest } = require('../utils/errorHandler');
+const pricingOptionModel = require('./pricingOptionModel');
 
 /**
  * Listing Model
@@ -303,6 +304,22 @@ const listingModel = {
       query += ` LIMIT ${limitInt} OFFSET ${offsetInt}`;
       
       const listings = await db.query(query, params);
+      
+      // Add pricing options with duration for each listing
+      if (listings.length > 0) {
+        for (const listing of listings) {
+          // Get pricing options for this listing
+          listing.pricing_options = await pricingOptionModel.getByListingId(listing.id);
+          
+          // Add duration to the main listing object for the default pricing option
+          if (listing.pricing_options && listing.pricing_options.length > 0) {
+            const defaultOption = listing.pricing_options.find(option => option.is_default) || listing.pricing_options[0];
+            listing.price_duration = defaultOption.duration || 1;
+            listing.price_unit_type = defaultOption.unit_type || listing.unit_type;
+          }
+        }
+      }
+      
       return listings;
     } catch (error) {
       console.error('Error getting listings:', error);
@@ -348,6 +365,20 @@ const listingModel = {
       `;
       
       listing.photos = await db.query(photosQuery, [id]);
+      
+      // Get pricing options with duration
+      listing.pricing_options = await pricingOptionModel.getByListingId(id);
+      
+      // Add duration to the main listing object for the default pricing option
+      if (listing.pricing_options && listing.pricing_options.length > 0) {
+        const defaultOption = listing.pricing_options.find(option => option.is_default) || listing.pricing_options[0];
+        listing.price_duration = defaultOption.duration || 1;
+        listing.price_unit_type = defaultOption.unit_type || listing.unit_type;
+      }
+      
+      // Get special pricing for this listing
+      const specialPricingModel = require('./specialPricingModel');
+      listing.special_pricing = await specialPricingModel.getByListingId(id);
       
       // Get type-specific details based on listing_type
       if (listing.listing_type === 'property') {
@@ -483,6 +514,7 @@ const listingModel = {
         description,
         price_per_hour,
         price_per_day,
+        price_per_half_night,
         unit_type,
         location,
         latitude,
@@ -557,9 +589,9 @@ const listingModel = {
         // Insert listing
         const listingResult = await connection.query(
           `INSERT INTO listings (
-            user_id, category_id, listing_type, title, description, price_per_hour, price_per_day, 
+            user_id, category_id, listing_type, title, description, price_per_hour, price_per_day, price_per_half_night,
             unit_type, is_hourly, location, latitude, longitude, instant_booking, cancellation_policy
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             user_id,
             category_id,
@@ -568,6 +600,7 @@ const listingModel = {
             description,
             price_per_hour || null,
             price_per_day || null,
+            price_per_half_night || null,
             unit_type || 'hour',
             unit_type === 'hour' || unit_type === 'session' ? 1 : 0,
             location,
@@ -580,154 +613,303 @@ const listingModel = {
         
         const listingId = listingResult[0].insertId;
         
+        // Insert pricing options if provided
+        if (listingData.pricing_options && Array.isArray(listingData.pricing_options) && listingData.pricing_options.length > 0) {
+          await pricingOptionModel.createMultiple(listingId, listingData.pricing_options, connection);
+        } 
+        // Create default pricing options based on legacy fields if no pricing options provided
+        else if (price_per_hour || price_per_day || price_per_half_night) {
+          const pricingOptions = [];
+          
+          if (price_per_hour) {
+            pricingOptions.push({
+              price: price_per_hour,
+              unit_type: 'hour',
+              duration: 1,
+              is_default: unit_type === 'hour'
+            });
+          }
+          
+          if (price_per_day) {
+            pricingOptions.push({
+              price: price_per_day,
+              unit_type: 'day',
+              duration: 1,
+              is_default: unit_type === 'day'
+            });
+          }
+          
+          if (price_per_half_night) {
+            pricingOptions.push({
+              price: price_per_half_night,
+              unit_type: 'night',
+              duration: 1,
+              is_default: unit_type === 'night'
+            });
+          }
+          
+          if (pricingOptions.length > 0) {
+            await pricingOptionModel.createMultiple(listingId, pricingOptions, connection);
+          }
+        }
+        
         // Insert type-specific details based on listing_type
         if (listing_type === 'property') {
-          // Insert property details
-          await connection.query(
-            `INSERT INTO listing_property_details (
-              listing_id, max_guests, bedrooms, beds, bathrooms, property_type, room_type, min_nights, max_nights
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              listingId,
-              max_guests || null,
-              bedrooms || null,
-              beds || null,
-              bathrooms || null,
-              property_type || 'other',
-              room_type || null,
-              min_nights || 1,
-              max_nights || null
-            ]
+          // Check if property details already exist
+          const [existingPropertyDetails] = await connection.query(
+            'SELECT listing_id FROM listing_property_details WHERE listing_id = ?',
+            [listingId]
           );
+          
+          if (existingPropertyDetails.length === 0) {
+            // Insert property details only if they don't exist
+            await connection.query(
+              `INSERT INTO listing_property_details (
+                listing_id, max_guests, bedrooms, beds, bathrooms, property_type, room_type, min_nights, max_nights
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                listingId,
+                max_guests || null,
+                bedrooms || null,
+                beds || null,
+                bathrooms || null,
+                property_type || 'other',
+                room_type || null,
+                min_nights || 1,
+                max_nights || null
+              ]
+            );
+          }
         } else if (listing_type === 'vehicle') {
-          // Insert car details
-          await connection.query(
-            `INSERT INTO listing_car_details (
-              listing_id, brand, model, year, transmission, seats, fuel_type, mileage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              listingId,
-              brand || null,
-              model || null,
-              year || null,
-              transmission || null,
-              seats || null,
-              fuel_type || null,
-              mileage || null
-            ]
+          // Check if vehicle details already exist
+          const [existingVehicleDetails] = await connection.query(
+            'SELECT listing_id FROM listing_car_details WHERE listing_id = ?',
+            [listingId]
           );
+          
+          if (existingVehicleDetails.length === 0) {
+            // Insert car details only if they don't exist
+            await connection.query(
+              `INSERT INTO listing_car_details (
+                listing_id, brand, model, year, transmission, seats, fuel_type, mileage
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                listingId,
+                brand || null,
+                model || null,
+                year || null,
+                transmission || null,
+                seats || null,
+                fuel_type || null,
+                mileage || null
+              ]
+            );
+          }
         } else if (listing_type === 'service') {
-          // Insert service details
-          await connection.query(
-            `INSERT INTO service_details (
-              listing_id, service_type, service_duration, preparation_time, cleanup_time, 
-              brings_equipment, remote_service, experience_years, appointment_required
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              listingId,
-              service_type,
-              service_duration || null,
-              preparation_time || null,
-              cleanup_time || null,
-              brings_equipment ? 1 : 0,
-              remote_service ? 1 : 0,
-              experience_years || null,
-              appointment_required ? 1 : 0
-            ]
+          // Check if service details already exist
+          const [existingServiceDetails] = await connection.query(
+            'SELECT listing_id FROM service_details WHERE listing_id = ?',
+            [listingId]
           );
+          
+          if (existingServiceDetails.length === 0) {
+            // Insert service details only if they don't exist
+            await connection.query(
+              `INSERT INTO service_details (
+                listing_id, service_type, service_duration, preparation_time, cleanup_time, 
+                brings_equipment, remote_service, experience_years, appointment_required
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                listingId,
+                service_type,
+                service_duration || null,
+                preparation_time || null,
+                cleanup_time || null,
+                brings_equipment ? 1 : 0,
+                remote_service ? 1 : 0,
+                experience_years || null,
+                appointment_required ? 1 : 0
+              ]
+            );
+          }
         } else if (listing_type === 'venue') {
-          // Insert venue details
-          await connection.query(
-            `INSERT INTO listing_venue_details (
-              listing_id, venue_type, max_capacity, indoor_space_sqm, outdoor_space_sqm,
-              has_catering, has_parking, has_sound_system, has_stage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              listingId,
-              venue_type,
-              max_capacity || null,
-              indoor_space_sqm || null,
-              outdoor_space_sqm || null,
-              has_catering ? 1 : 0,
-              has_parking ? 1 : 0,
-              has_sound_system ? 1 : 0,
-              has_stage ? 1 : 0
-            ]
+          // Check if venue details already exist
+          const [existingVenueDetails] = await connection.query(
+            'SELECT listing_id FROM listing_venue_details WHERE listing_id = ?',
+            [listingId]
           );
+          
+          if (existingVenueDetails.length === 0) {
+            // Insert venue details only if they don't exist
+            await connection.query(
+              `INSERT INTO listing_venue_details (
+                listing_id, venue_type, max_capacity, indoor_space_sqm, outdoor_space_sqm,
+                has_catering, has_parking, has_sound_system, has_stage
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                listingId,
+                venue_type,
+                max_capacity || null,
+                indoor_space_sqm || null,
+                outdoor_space_sqm || null,
+                has_catering ? 1 : 0,
+                has_parking ? 1 : 0,
+                has_sound_system ? 1 : 0,
+                has_stage ? 1 : 0
+              ]
+            );
+          }
         } else if (listing_type === 'subscription') {
-          // Insert subscription details
-          await connection.query(
-            `INSERT INTO listing_subscription_details (
-              listing_id, subscription_type, duration_days, recurring,
-              includes_trainer, includes_classes, max_visits_per_week
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [
-              listingId,
-              subscription_type,
-              duration_days || null,
-              recurring ? 1 : 0,
-              includes_trainer ? 1 : 0,
-              includes_classes ? 1 : 0,
-              max_visits_per_week || null
-            ]
+          // Check if subscription details already exist
+          const [existingSubscriptionDetails] = await connection.query(
+            'SELECT listing_id FROM listing_subscription_details WHERE listing_id = ?',
+            [listingId]
           );
+          
+          if (existingSubscriptionDetails.length === 0) {
+            // Insert subscription details only if they don't exist
+            await connection.query(
+              `INSERT INTO listing_subscription_details (
+                listing_id, subscription_type, duration_days, recurring,
+                includes_trainer, includes_classes, max_visits_per_week
+              ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [
+                listingId,
+                subscription_type,
+                duration_days || null,
+                recurring ? 1 : 0,
+                includes_trainer ? 1 : 0,
+                includes_classes ? 1 : 0,
+                max_visits_per_week || null
+              ]
+            );
+          }
         }
         
         // Insert photos if provided
         if (photos && photos.length > 0) {
           for (const photo of photos) {
-            await connection.query(
-              `INSERT INTO listing_photos (listing_id, image_url, is_cover) VALUES (?, ?, ?)`,
-              [listingId, photo.image_url, photo.is_cover ? 1 : 0]
+            // Check if this photo is already associated with the listing
+            const [existingPhoto] = await connection.query(
+              'SELECT * FROM listing_photos WHERE listing_id = ? AND image_url = ?',
+              [listingId, photo.image_url]
             );
+            
+            // Only insert if the photo doesn't already exist for this listing
+            if (existingPhoto.length === 0) {
+              await connection.query(
+                `INSERT INTO listing_photos (listing_id, image_url, is_cover) VALUES (?, ?, ?)`,
+                [listingId, photo.image_url, photo.is_cover ? 1 : 0]
+              );
+            }
           }
         }
         
         // Insert amenities if provided
         if (amenities && amenities.length > 0) {
           for (const amenityId of amenities) {
-            await connection.query(
-              `INSERT INTO listing_amenities (listing_id, amenity_id) VALUES (?, ?)`,
+            // Check if this amenity is already associated with the listing
+            const [existingAmenity] = await connection.query(
+              'SELECT * FROM listing_amenities WHERE listing_id = ? AND amenity_id = ?',
               [listingId, amenityId]
             );
+            
+            // Only insert if the amenity doesn't already exist for this listing
+            if (existingAmenity.length === 0) {
+              await connection.query(
+                `INSERT INTO listing_amenities (listing_id, amenity_id) VALUES (?, ?)`,
+                [listingId, amenityId]
+              );
+            }
           }
         }
         
         // Insert house rules if provided
         if (house_rules && house_rules.length > 0) {
           for (const rule of house_rules) {
-            await connection.query(
-              `INSERT INTO listing_house_rules (listing_id, rule_id, allowed, description) 
-              VALUES (?, ?, ?, ?)`,
-              [listingId, rule.rule_id, rule.allowed ? 1 : 0, rule.description || null]
+            // Check if this rule is already associated with the listing
+            const [existingRule] = await connection.query(
+              'SELECT * FROM listing_house_rules WHERE listing_id = ? AND rule_id = ?',
+              [listingId, rule.rule_id]
             );
+            
+            if (existingRule.length === 0) {
+              // Only insert if the rule doesn't already exist for this listing
+              await connection.query(
+                `INSERT INTO listing_house_rules (listing_id, rule_id, allowed, description) 
+                VALUES (?, ?, ?, ?)`,
+                [listingId, rule.rule_id, rule.allowed ? 1 : 0, rule.description || null]
+              );
+            } else {
+              // Update existing rule if it already exists
+              await connection.query(
+                `UPDATE listing_house_rules SET allowed = ?, description = ? 
+                WHERE listing_id = ? AND rule_id = ?`,
+                [rule.allowed ? 1 : 0, rule.description || null, listingId, rule.rule_id]
+              );
+            }
           }
         }
         
         // Insert safety features if provided
         if (safety_features && safety_features.length > 0) {
           for (const featureId of safety_features) {
-            await connection.query(
-              `INSERT INTO listing_safety_features (listing_id, feature_id) VALUES (?, ?)`,
+            // Check if this safety feature is already associated with the listing
+            const [existingFeature] = await connection.query(
+              'SELECT * FROM listing_safety_features WHERE listing_id = ? AND feature_id = ?',
               [listingId, featureId]
             );
+            
+            // Only insert if the safety feature doesn't already exist for this listing
+            if (existingFeature.length === 0) {
+              await connection.query(
+                `INSERT INTO listing_safety_features (listing_id, feature_id) VALUES (?, ?)`,
+                [listingId, featureId]
+              );
+            }
+          }
+        }
+
+        // Insert special pricing if provided
+        if (listingData.special_pricing && Array.isArray(listingData.special_pricing) && listingData.special_pricing.length > 0) {
+          const specialPricingModel = require('./specialPricingModel');
+          
+          for (const specialPricing of listingData.special_pricing) {
+            try {
+              // Set the listing ID
+              specialPricing.listing_id = listingId;
+              
+              // Create special pricing entry
+              await specialPricingModel.create(specialPricing, connection);
+            } catch (error) {
+              console.error('Error creating special pricing:', error);
+              // Continue with other entries even if one fails
+            }
           }
         }
         
-        // Create default listing settings
-        await connection.query(
-          `INSERT INTO listing_settings (
-            listing_id, availability_mode, min_advance_booking_hours, max_advance_booking_days, 
-            instant_booking_enabled
-          ) VALUES (?, ?, ?, ?, ?)`,
-          [
-            listingId,
-            'available-by-default',
-            24,
-            365,
-            instant_booking ? 1 : 0
-          ]
+        // Check if listing settings already exist
+        const [existingSettings] = await connection.query(
+          'SELECT listing_id FROM listing_settings WHERE listing_id = ?',
+          [listingId]
         );
+        
+        if (existingSettings.length === 0) {
+          // Create default listing settings only if they don't exist
+          await connection.query(
+            `INSERT INTO listing_settings (
+              listing_id, availability_mode, min_advance_booking_hours, max_advance_booking_days, 
+              instant_booking_enabled
+            ) VALUES (?, ?, ?, ?, ?)`,
+            [
+              listingId,
+              'available-by-default',
+              24,
+              365,
+              instant_booking ? 1 : 0
+            ]
+          );
+        }
         
         // Commit transaction
         await connection.commit();
@@ -756,6 +938,9 @@ const listingModel = {
    * @returns {Promise<Object>} - Updated listing
    */
   async update(id, listingData) {
+    // Initialize connection outside try block so it's available in finally
+    let connection = null;
+    
     try {
       // Check if listing exists
       const existingListing = await db.getById('listings', id);
@@ -765,7 +950,7 @@ const listingModel = {
       }
       
       // Start a transaction
-      const connection = await db.getPool().getConnection();
+      connection = await db.getPool().getConnection();
       await connection.beginTransaction();
       
       try {
@@ -780,7 +965,8 @@ const listingModel = {
           service_details = {},
           subscription_details = {},
           venue_details = {},
-          blocked_dates
+          blocked_dates,
+          pricing_options
         } = listingData;
         
         // Define the fields that belong to the main listings table
@@ -846,13 +1032,18 @@ const listingModel = {
         if (listingData.has_sound_system !== undefined) venue_details.has_sound_system = listingData.has_sound_system;
         if (listingData.has_stage !== undefined) venue_details.has_stage = listingData.has_stage;
         
-        // Update main listing if there are fields to update
-        if (Object.keys(mainListingData).length > 0) {
+              // Update main listing if there are fields to update
+      if (Object.keys(mainListingData).length > 0) {
+        try {
           await connection.query(
             'UPDATE listings SET ? WHERE id = ?',
             [mainListingData, id]
           );
+        } catch (error) {
+          console.error('Error updating listing main data:', error);
+          throw error;
         }
+      }
         
         // Check if listing type has changed
         const listingType = mainListingData.listing_type || existingListing.listing_type;
@@ -1084,6 +1275,35 @@ const listingModel = {
           }
         }
         
+        // Process pricing options if provided
+        if (pricing_options && Array.isArray(pricing_options)) {
+          // Use the pricing option model to handle pricing options
+          // Pass the connection to ensure it's part of the same transaction
+          await pricingOptionModel.createMultiple(id, pricing_options, connection);
+        }
+
+        // Process special pricing if provided
+        if (listingData.special_pricing && Array.isArray(listingData.special_pricing)) {
+          const specialPricingModel = require('./specialPricingModel');
+          
+          // Delete existing special pricing for this listing
+          await connection.query('DELETE FROM special_pricing WHERE listing_id = ?', [id]);
+          
+          // Insert new special pricing entries
+          for (const specialPricing of listingData.special_pricing) {
+            try {
+              // Set the listing ID
+              specialPricing.listing_id = id;
+              
+              // Create special pricing entry
+              await specialPricingModel.create(specialPricing, connection);
+            } catch (error) {
+              console.error('Error creating special pricing during update:', error);
+              // Continue with other entries even if one fails
+            }
+          }
+        }
+        
         // Commit transaction
         await connection.commit();
         
@@ -1093,10 +1313,18 @@ const listingModel = {
         return updatedListing;
       } catch (error) {
         // Rollback transaction on error
-        await connection.rollback();
+        if (connection) {
+          try {
+            await connection.rollback();
+          } catch (rollbackError) {
+            console.error('Error rolling back transaction:', rollbackError);
+          }
+        }
         throw error;
       } finally {
-        connection.release();
+        if (connection) {
+          connection.release();
+        }
       }
     } catch (error) {
       console.error('Error updating listing:', error);
@@ -1561,4 +1789,4 @@ const listingModel = {
   }
 };
 
-module.exports = listingModel; 
+module.exports = listingModel;

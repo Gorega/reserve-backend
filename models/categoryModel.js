@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { notFound } = require('../utils/errorHandler');
+const pricingOptionModel = require('./pricingOptionModel');
 
 /**
  * Category Model
@@ -282,6 +283,22 @@ const categoryModel = {
       query += ` ORDER BY l.created_at DESC LIMIT ${limitNum} OFFSET ${offset}`;
       
       const listings = await db.query(query, params);
+      
+      // Add pricing options with duration for each listing
+      if (listings.length > 0) {
+        for (const listing of listings) {
+          // Get pricing options for this listing
+          listing.pricing_options = await pricingOptionModel.getByListingId(listing.id);
+          
+          // Add duration to the main listing object for the default pricing option
+          if (listing.pricing_options && listing.pricing_options.length > 0) {
+            const defaultOption = listing.pricing_options.find(option => option.is_default) || listing.pricing_options[0];
+            listing.price_duration = defaultOption.duration || 1;
+            listing.price_unit_type = defaultOption.unit_type || listing.unit_type;
+          }
+        }
+      }
+      
       return listings;
     } catch (error) {
       console.error('Error getting listings by category:', error);

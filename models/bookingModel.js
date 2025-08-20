@@ -1,6 +1,8 @@
 const db = require('../config/database');
 const { notFound, badRequest } = require('../utils/errorHandler');
 const listingModel = require('./listingModel');
+const smartPricingUtils = require('../utils/smartPricingUtils');
+const specialPricingModel = require('./specialPricingModel');
 
 /**
  * Booking Model
@@ -215,19 +217,109 @@ const bookingModel = {
       // Calculate booking duration and total price
       const startDate = new Date(formattedStartDatetime);
       const endDate = new Date(formattedEndDatetime);
-      const durationInMs = endDate - startDate;
-      const durationInHours = durationInMs / (1000 * 60 * 60);
-      const durationInDays = durationInMs / (1000 * 60 * 60 * 24);
-      
       let totalPrice = 0;
-      
-      if (booking_type === 'hourly' || booking_type === 'session' || booking_type === 'appointment') {
-        totalPrice = listing.price_per_hour * Math.ceil(durationInHours);
-      } else if (booking_type === 'daily') {
-        totalPrice = listing.price_per_day * Math.ceil(durationInDays);
-      } else if (booking_type === 'subscription') {
-        // For subscriptions, use the price_per_day field as the subscription price
-        totalPrice = listing.price_per_day;
+      let selectedPricingOption = null;
+      let unitsBooked = 1;
+
+      // Use smart pricing if pricing_options are available
+      if (listing.pricing_options && Array.isArray(listing.pricing_options) && listing.pricing_options.length > 0) {
+        try {
+          // Determine preferred unit type based on booking_type
+          let preferredUnitType = null;
+          switch (booking_type) {
+            case 'hourly':
+            case 'session':
+            case 'appointment':
+              preferredUnitType = 'hour';
+              break;
+            case 'daily':
+              preferredUnitType = 'day';
+              break;
+            case 'night':
+              preferredUnitType = 'night';
+              break;
+            case 'subscription':
+              preferredUnitType = 'month'; // or 'week' depending on subscription type
+              break;
+          }
+
+          const smartPricing = smartPricingUtils.calculateSmartPrice(
+            listing, 
+            startDate, 
+            endDate, 
+            preferredUnitType
+          );
+
+          // Check for special pricing and apply it if available
+          totalPrice = await this.calculatePriceWithSpecialPricing(
+            listing_id,
+            startDate,
+            endDate,
+            smartPricing
+          );
+          
+          selectedPricingOption = smartPricing.pricingOption;
+          unitsBooked = smartPricing.totalUnits;
+
+          console.log('Smart pricing calculation with special pricing:', {
+            unitType: smartPricing.unitType,
+            unitsBooked,
+            pricePerUnit: smartPricing.pricePerUnit,
+            totalPrice,
+            duration: smartPricing.duration,
+            minimumUnits: smartPricing.minimumUnits
+          });
+        } catch (smartPricingError) {
+          console.error('Error with smart pricing, falling back to legacy pricing:', smartPricingError);
+          // Fall back to legacy pricing with special pricing check
+          const durationInMs = endDate - startDate;
+          const durationInHours = durationInMs / (1000 * 60 * 60);
+          const durationInDays = durationInMs / (1000 * 60 * 60 * 24);
+          
+          let basePrice = 0;
+          if (booking_type === 'hourly' || booking_type === 'session' || booking_type === 'appointment') {
+            basePrice = listing.price_per_hour * Math.ceil(durationInHours);
+          } else if (booking_type === 'daily') {
+            basePrice = listing.price_per_day * Math.ceil(durationInDays);
+          } else if (booking_type === 'subscription') {
+            basePrice = listing.price_per_day;
+          }
+          
+          // Check for special pricing on legacy pricing
+          totalPrice = await this.calculateLegacyPriceWithSpecialPricing(
+            listing_id,
+            startDate,
+            endDate,
+            basePrice,
+            booking_type
+          );
+        }
+      } else {
+        // Fall back to legacy pricing when no pricing_options available
+        const durationInMs = endDate - startDate;
+        const durationInHours = durationInMs / (1000 * 60 * 60);
+        const durationInDays = durationInMs / (1000 * 60 * 60 * 24);
+        
+        let basePrice = 0;
+        if (booking_type === 'hourly' || booking_type === 'session' || booking_type === 'appointment') {
+          basePrice = listing.price_per_hour * Math.ceil(durationInHours);
+          unitsBooked = Math.ceil(durationInHours);
+        } else if (booking_type === 'daily') {
+          basePrice = listing.price_per_day * Math.ceil(durationInDays);
+          unitsBooked = Math.ceil(durationInDays);
+        } else if (booking_type === 'subscription') {
+          basePrice = listing.price_per_day;
+          unitsBooked = 1;
+        }
+        
+        // Check for special pricing on legacy pricing
+        totalPrice = await this.calculateLegacyPriceWithSpecialPricing(
+          listing_id,
+          startDate,
+          endDate,
+          basePrice,
+          booking_type
+        );
       }
       
       // Calculate platform commission (default 10%)
@@ -256,14 +348,15 @@ const bookingModel = {
       // Set auto-cancel time (same as deposit deadline initially)
       const autoCancelAt = new Date(depositDeadline);
       
-      // Insert booking
+      // Insert booking with pricing option information
       const bookingResult = await db.query(
         `INSERT INTO bookings (
           listing_id, user_id, start_datetime, end_datetime, booking_type,
           guests_count, total_price, deposit_amount, remaining_amount,
           platform_commission, provider_earnings, user_service_fee,
-          status, payment_status, deposit_deadline, auto_cancel_at, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          status, payment_status, deposit_deadline, auto_cancel_at, notes,
+          pricing_option_id, units_booked
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           listing_id,
           user_id,
@@ -281,7 +374,9 @@ const bookingModel = {
           'unpaid',
           this.formatDateForMySQL(depositDeadline),
           this.formatDateForMySQL(autoCancelAt),
-          notes || null
+          notes || null,
+          selectedPricingOption ? selectedPricingOption.id : null,
+          unitsBooked
         ]
       );
       
@@ -563,6 +658,179 @@ const bookingModel = {
   },
   
   /**
+   * Calculate price with special pricing for smart pricing
+   * @param {number} listingId - Listing ID
+   * @param {Date} startDate - Start date
+   * @param {Date} endDate - End date
+   * @param {Object} smartPricing - Smart pricing calculation result
+   * @returns {Promise<number>} - Total price with special pricing applied
+   */
+  async calculatePriceWithSpecialPricing(listingId, startDate, endDate, smartPricing) {
+    try {
+      if (!smartPricing.pricingOption) {
+        return smartPricing.basePrice;
+      }
+
+      const pricingOptionId = smartPricing.pricingOption.id;
+      let totalPrice = 0;
+      let hasSpecialPricing = false;
+
+      // Calculate price for each date in the range
+      const currentDate = new Date(startDate);
+      const endDateOnly = new Date(endDate);
+      
+      while (currentDate < endDateOnly) {
+        const dateString = currentDate.toISOString().split('T')[0];
+        
+        // Check for special pricing for this date
+        const effectivePrice = await specialPricingModel.getEffectivePrice(
+          listingId,
+          dateString,
+          pricingOptionId
+        );
+        
+        if (effectivePrice.source === 'special') {
+          hasSpecialPricing = true;
+          // Calculate units for this date based on unit type
+          const unitsForDate = this.calculateUnitsForDate(
+            smartPricing.unitType,
+            smartPricing.duration
+          );
+          totalPrice += effectivePrice.price * unitsForDate;
+        } else {
+          // Use regular pricing for this date
+          const unitsForDate = this.calculateUnitsForDate(
+            smartPricing.unitType,
+            smartPricing.duration
+          );
+          totalPrice += effectivePrice.price * unitsForDate;
+        }
+        
+        // Move to next date based on unit type
+        if (smartPricing.unitType === 'hour') {
+          currentDate.setHours(currentDate.getHours() + smartPricing.duration);
+        } else {
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      }
+      
+      console.log('Special pricing calculation:', {
+        hasSpecialPricing,
+        originalPrice: smartPricing.basePrice,
+        finalPrice: totalPrice
+      });
+      
+      return totalPrice > 0 ? totalPrice : smartPricing.basePrice;
+    } catch (error) {
+      console.error('Error calculating price with special pricing:', error);
+      return smartPricing.basePrice;
+    }
+  },
+
+  /**
+   * Calculate price with special pricing for legacy pricing
+   * @param {number} listingId - Listing ID
+   * @param {Date} startDate - Start date
+   * @param {Date} endDate - End date
+   * @param {number} basePrice - Base price from legacy calculation
+   * @param {string} bookingType - Booking type
+   * @returns {Promise<number>} - Total price with special pricing applied
+   */
+  async calculateLegacyPriceWithSpecialPricing(listingId, startDate, endDate, basePrice, bookingType) {
+    try {
+      // For legacy pricing, we need to find the default pricing option
+      const defaultPricingOption = await db.query(
+        'SELECT * FROM pricing_options WHERE listing_id = ? AND is_default = 1 LIMIT 1',
+        [listingId]
+      );
+      
+      if (defaultPricingOption.length === 0) {
+        // No pricing options available, return base price
+        return basePrice;
+      }
+      
+      const pricingOptionId = defaultPricingOption[0].id;
+      let totalPrice = 0;
+      let hasSpecialPricing = false;
+      
+      // Calculate price for each date in the range
+      const currentDate = new Date(startDate);
+      const endDateOnly = new Date(endDate);
+      const durationInMs = endDate - startDate;
+      
+      if (bookingType === 'hourly' || bookingType === 'session' || bookingType === 'appointment') {
+        // For hourly bookings, check special pricing for the start date
+        const dateString = startDate.toISOString().split('T')[0];
+        const effectivePrice = await specialPricingModel.getEffectivePrice(
+          listingId,
+          dateString,
+          pricingOptionId
+        );
+        
+        if (effectivePrice.source === 'special') {
+          hasSpecialPricing = true;
+          const durationInHours = durationInMs / (1000 * 60 * 60);
+          totalPrice = effectivePrice.price * Math.ceil(durationInHours);
+        } else {
+          totalPrice = basePrice;
+        }
+      } else {
+        // For daily/night bookings, check each date
+        while (currentDate < endDateOnly) {
+          const dateString = currentDate.toISOString().split('T')[0];
+          
+          const effectivePrice = await specialPricingModel.getEffectivePrice(
+            listingId,
+            dateString,
+            pricingOptionId
+          );
+          
+          if (effectivePrice.source === 'special') {
+            hasSpecialPricing = true;
+            totalPrice += effectivePrice.price;
+          } else {
+            totalPrice += effectivePrice.price;
+          }
+          
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      }
+      
+      console.log('Legacy special pricing calculation:', {
+        hasSpecialPricing,
+        originalPrice: basePrice,
+        finalPrice: totalPrice
+      });
+      
+      return totalPrice > 0 ? totalPrice : basePrice;
+    } catch (error) {
+      console.error('Error calculating legacy price with special pricing:', error);
+      return basePrice;
+    }
+  },
+
+  /**
+   * Calculate units for a specific date based on unit type
+   * @param {string} unitType - Unit type (hour, day, night, etc.)
+   * @param {number} duration - Duration in units
+   * @returns {number} - Number of units
+   */
+  calculateUnitsForDate(unitType, duration) {
+    // For most unit types, one date = one unit
+    // This can be customized based on specific business logic
+    switch (unitType) {
+      case 'hour':
+        return duration; // Duration in hours
+      case 'day':
+      case 'night':
+      case 'week':
+      case 'month':
+      default:
+        return 1; // One unit per date
+    }
+  },
+
+  /**
    * Format a date for MySQL
    * @param {string|Date} date - Date to format
    * @returns {string} - Formatted date string
@@ -581,4 +849,4 @@ const bookingModel = {
   }
 };
 
-module.exports = bookingModel; 
+module.exports = bookingModel;
