@@ -33,7 +33,7 @@ const bookingModel = {
                l.unit_type as listing_unit_type,
                l.price_per_hour,
                l.price_per_day,
-               p.status as payment_status,
+               COALESCE(p.status, b.payment_status) as payment_status_actual,
                (SELECT image_url FROM listing_photos WHERE listing_id = l.id AND is_cover = 1 LIMIT 1) as listing_cover_photo
         FROM bookings b
         JOIN users u ON b.user_id = u.id
@@ -60,6 +60,12 @@ const bookingModel = {
         if (filters.provider_id) {
           filterConditions.push('l.user_id = ?');
           params.push(Number(filters.provider_id));
+        }
+        
+        if (filters.user_or_provider_id) {
+          filterConditions.push('(b.user_id = ? OR l.user_id = ?)');
+          params.push(Number(filters.user_or_provider_id));
+          params.push(Number(filters.user_or_provider_id));
         }
         
         if (filters.status) {
@@ -97,6 +103,48 @@ const bookingModel = {
       }
       
       const bookings = await db.query(query, params);
+      
+      
+      // Test without filters to see if data exists
+      if (bookings.length === 0 && Object.keys(filters).length > 0) {
+        const testQuery = `
+          SELECT COUNT(*) as total
+          FROM bookings b
+          JOIN users u ON b.user_id = u.id
+          JOIN listings l ON b.listing_id = l.id
+        `;
+        const testResult = await db.query(testQuery);
+        
+        // Test specific user/provider data
+        if (filters.user_id) {
+          const userTestQuery = `SELECT COUNT(*) as total FROM bookings WHERE user_id = ?`;
+          const userTestResult = await db.query(userTestQuery, [filters.user_id]);
+        }
+        
+        if (filters.provider_id) {
+          const providerTestQuery = `
+            SELECT COUNT(*) as total 
+            FROM bookings b 
+            JOIN listings l ON b.listing_id = l.id 
+            WHERE l.user_id = ?
+          `;
+          const providerTestResult = await db.query(providerTestQuery, [filters.provider_id]);
+          
+          // Check what listings this user owns
+          const listingsQuery = `SELECT id, title, user_id FROM listings WHERE user_id = ?`;
+          const userListings = await db.query(listingsQuery, [filters.provider_id]);
+          
+          // Check the actual listing owner for our booking
+          const listingOwnerQuery = `
+            SELECT l.id, l.title, l.user_id as listing_owner, b.user_id as booking_user
+            FROM bookings b 
+            JOIN listings l ON b.listing_id = l.id 
+            WHERE b.listing_id = 9
+          `;
+          const listingOwner = await db.query(listingOwnerQuery);
+        }
+      }
+      
       return bookings;
     } catch (error) {
       console.error('Error getting bookings:', error);
@@ -124,13 +172,17 @@ const bookingModel = {
                l.user_id as provider_id,
                p.id as payment_id,
                p.method as payment_method,
-               p.status as payment_status,
+               COALESCE(p.status, b.payment_status) as payment_status_actual,
                p.transaction_id,
-               p.paid_at
+               p.paid_at,
+               p.payment_location_id,
+               pl.name as payment_location_name,
+               pl.address as payment_location_address
         FROM bookings b
         JOIN users u ON b.user_id = u.id
         JOIN listings l ON b.listing_id = l.id
         LEFT JOIN payments p ON b.id = p.booking_id
+        LEFT JOIN payment_locations pl ON p.payment_location_id = pl.id
         WHERE b.id = ?
       `;
       
@@ -261,14 +313,6 @@ const bookingModel = {
           selectedPricingOption = smartPricing.pricingOption;
           unitsBooked = smartPricing.totalUnits;
 
-          console.log('Smart pricing calculation with special pricing:', {
-            unitType: smartPricing.unitType,
-            unitsBooked,
-            pricePerUnit: smartPricing.pricePerUnit,
-            totalPrice,
-            duration: smartPricing.duration,
-            minimumUnits: smartPricing.minimumUnits
-          });
         } catch (smartPricingError) {
           console.error('Error with smart pricing, falling back to legacy pricing:', smartPricingError);
           // Fall back to legacy pricing with special pricing check
@@ -408,6 +452,10 @@ const bookingModel = {
       if (bookingData.status) updateData.status = bookingData.status;
       if (bookingData.payment_status) updateData.payment_status = bookingData.payment_status;
       if (bookingData.notes) updateData.notes = bookingData.notes;
+      if (bookingData.deposit_amount) updateData.deposit_amount = bookingData.deposit_amount;
+      if (bookingData.remaining_amount) updateData.remaining_amount = bookingData.remaining_amount;
+      if (bookingData.deposit_deadline) updateData.deposit_deadline = bookingData.deposit_deadline;
+      if (bookingData.auto_cancel_at) updateData.auto_cancel_at = bookingData.auto_cancel_at;
       
       // Update booking
       await db.update('bookings', id, updateData);
@@ -714,11 +762,6 @@ const bookingModel = {
         }
       }
       
-      console.log('Special pricing calculation:', {
-        hasSpecialPricing,
-        originalPrice: smartPricing.basePrice,
-        finalPrice: totalPrice
-      });
       
       return totalPrice > 0 ? totalPrice : smartPricing.basePrice;
     } catch (error) {
@@ -796,11 +839,6 @@ const bookingModel = {
         }
       }
       
-      console.log('Legacy special pricing calculation:', {
-        hasSpecialPricing,
-        originalPrice: basePrice,
-        finalPrice: totalPrice
-      });
       
       return totalPrice > 0 ? totalPrice : basePrice;
     } catch (error) {

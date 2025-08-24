@@ -978,9 +978,23 @@ const hostController = {
    */
   async addListingBlockedDates(req, res, next) {
     try {
+      console.log('\n🔒 BACKEND BLOCKING DEBUG - Request received');
+      console.log('User ID:', req.user.id);
+      console.log('Listing ID:', req.params.listingId);
+      console.log('Request body:', JSON.stringify(req.body, null, 2));
+      
       const userId = req.user.id;
       const { listingId } = req.params;
-      const { start_date, end_date, reason } = req.body;
+      const { start_date, end_date, start_datetime, end_datetime, reason, is_overnight, primary_date } = req.body;
+      
+      console.log('Extracted fields:');
+      console.log('- start_date:', start_date);
+      console.log('- end_date:', end_date);
+      console.log('- start_datetime:', start_datetime);
+      console.log('- end_datetime:', end_datetime);
+      console.log('- reason:', reason);
+      console.log('- is_overnight:', is_overnight);
+      console.log('- primary_date:', primary_date);
       
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
@@ -988,31 +1002,54 @@ const hostController = {
         [listingId, userId]
       );
       
+      console.log('Listing found:', !!listing);
+      
       if (!listing) {
+        console.log('❌ Listing not found or not owned by user');
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
         });
       }
+
+      // Get availability mode for this listing
+      const [listingSettings] = await db.query(
+        'SELECT availability_mode FROM listing_settings WHERE listing_id = ?',
+        [listingId]
+      );
       
-      // Normalize dates to avoid timezone issues (same as availability dates)
+      const availabilityMode = listingSettings?.availability_mode || 'available-by-default';
+      console.log('Availability mode:', availabilityMode);
+      
+      // Handle both datetime and date formats from frontend
       let normalizedStartDate, normalizedEndDate;
+      
+      // Determine which format is being sent
+      const useDateTime = start_datetime && end_datetime;
+      const actualStartDate = useDateTime ? start_datetime : start_date;
+      const actualEndDate = useDateTime ? end_datetime : end_date;
+      
+      console.log('Format detection:');
+      console.log('- useDateTime:', useDateTime);
+      console.log('- actualStartDate:', actualStartDate);
+      console.log('- actualEndDate:', actualEndDate);
+      
       try {
-        // Handle start_date
-        if (!start_date || typeof start_date !== 'string') {
+        // Handle start_date/start_datetime
+        if (!actualStartDate || typeof actualStartDate !== 'string') {
           return res.status(400).json({
             status: 'error',
             message: 'Invalid start date format'
           });
         }
         
-        // Normalize start_date to YYYY-MM-DD format
-        if (/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
-          normalizedStartDate = start_date;
-        } else if (start_date.includes('T')) {
-          normalizedStartDate = start_date.split('T')[0];
+        // Normalize actualStartDate to YYYY-MM-DD format
+        if (/^\d{4}-\d{2}-\d{2}$/.test(actualStartDate)) {
+          normalizedStartDate = actualStartDate;
+        } else if (actualStartDate.includes('T')) {
+          normalizedStartDate = actualStartDate.split('T')[0];
         } else {
-          const testDate = new Date(start_date + 'T12:00:00');
+          const testDate = new Date(actualStartDate + 'T12:00:00');
           if (isNaN(testDate.getTime())) {
             return res.status(400).json({
               status: 'error',
@@ -1025,21 +1062,21 @@ const hostController = {
           normalizedStartDate = `${year}-${month}-${day}`;
         }
         
-        // Handle end_date
-        if (!end_date || typeof end_date !== 'string') {
+        // Handle end_date/end_datetime
+        if (!actualEndDate || typeof actualEndDate !== 'string') {
           return res.status(400).json({
             status: 'error',
             message: 'Invalid end date format'
           });
         }
         
-        // Normalize end_date to YYYY-MM-DD format
-        if (/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
-          normalizedEndDate = end_date;
-        } else if (end_date.includes('T')) {
-          normalizedEndDate = end_date.split('T')[0];
+        // Normalize actualEndDate to YYYY-MM-DD format
+        if (/^\d{4}-\d{2}-\d{2}$/.test(actualEndDate)) {
+          normalizedEndDate = actualEndDate;
+        } else if (actualEndDate.includes('T')) {
+          normalizedEndDate = actualEndDate.split('T')[0];
         } else {
-          const testDate = new Date(end_date + 'T12:00:00');
+          const testDate = new Date(actualEndDate + 'T12:00:00');
           if (isNaN(testDate.getTime())) {
             return res.status(400).json({
               status: 'error',
@@ -1052,13 +1089,7 @@ const hostController = {
           normalizedEndDate = `${year}-${month}-${day}`;
         }
         
-        // Validate that start date is before end date
-        if (normalizedStartDate > normalizedEndDate) {
-          return res.status(400).json({
-            status: 'error',
-            message: 'Start date must be before end date'
-          });
-        }
+        // Allow any start/end date combination - no validation needed
       } catch (err) {
         return res.status(400).json({
           status: 'error',
@@ -1066,9 +1097,25 @@ const hostController = {
         });
       }
       
-      // Create datetime strings in the same format as availability dates (no timezone)
-      const startDateTime = `${normalizedStartDate}T00:00:00`;
-      const endDateTime = `${normalizedEndDate}T23:59:59`;
+      // Handle time-specific blocking vs full-day blocking
+      let startDateTime, endDateTime;
+      
+      // Check if start_date includes time information
+      if (typeof start_date === 'string' && start_date.includes('T')) {
+        // Time-specific blocking - use the provided datetime
+        startDateTime = start_date.split('.')[0].replace('Z', '');
+      } else {
+        // Full-day blocking - start at beginning of day
+        startDateTime = `${normalizedStartDate}T00:00:00`;
+      }
+      
+      if (typeof end_date === 'string' && end_date.includes('T')) {
+        // Time-specific blocking - use the provided datetime
+        endDateTime = end_date.split('.')[0].replace('Z', '');
+      } else {
+        // Full-day blocking - end at end of day
+        endDateTime = `${normalizedEndDate}T23:59:59`;
+      }
       
 
       
@@ -1095,8 +1142,13 @@ const hostController = {
       const endDateObj = new Date(normalizedEndDate + 'T12:00:00');
       const dayDiff = Math.floor((endDateObj.getTime() - startDateObj.getTime()) / (24 * 60 * 60 * 1000));
       
-      // If we're blocking multiple days, create separate entries for each day
-      if (dayDiff > 0) {
+      // Check if this is a time-specific block within a single day
+      const isTimeSpecificBlock = (typeof start_date === 'string' && start_date.includes('T')) ||
+                                  (typeof end_date === 'string' && end_date.includes('T'));
+      
+      // If we're blocking multiple days AND it's not a datetime-based request, handle accordingly
+      // Skip this logic if we have datetime fields (useDateTime = true) as those should go to the new logic
+      if (dayDiff > 0 && !isTimeSpecificBlock && !useDateTime) {
         const blockedDates = [];
         
         // Start a transaction
@@ -1151,12 +1203,283 @@ const hostController = {
         } finally {
           connection.release();
         }
+      } else if (availabilityMode === 'available-by-default') {
+        console.log('🔄 Processing available-by-default mode blocking');
+        
+        if (useDateTime) {
+          console.log('📅 DateTime-based blocking');
+          
+          // Check if there's an existing blocked date that overlaps
+          console.log('🔍 Checking for existing overlapping blocks...');
+          const [existingBlock] = await db.query(
+            `SELECT * FROM blocked_dates 
+             WHERE listing_id = ? 
+             AND (
+               (start_datetime <= ? AND end_datetime >= ?) OR
+               (start_datetime <= ? AND end_datetime >= ?) OR
+               (start_datetime >= ? AND end_datetime <= ?)
+             )`,
+            [listingId, actualStartDate, actualStartDate, actualEndDate, actualEndDate, actualStartDate, actualEndDate]
+          );
+          
+          console.log('Existing block found:', !!existingBlock);
+          if (existingBlock) {
+            console.log('Existing block details:', existingBlock);
+          }
+          
+          if (existingBlock) {
+            console.log('🔄 Updating existing blocked date');
+            // Update existing blocked date
+            await db.query(
+              'UPDATE blocked_dates SET start_datetime = ?, end_datetime = ?, reason = ?, is_overnight = ?, primary_date = ? WHERE id = ?',
+              [actualStartDate, actualEndDate, reason || null, is_overnight || false, primary_date || null, existingBlock.id]
+            );
+            
+            const responseData = {
+              status: 'success',
+              message: 'Blocked date updated successfully',
+              data: {
+                id: existingBlock.id,
+                listing_id: listingId,
+                start_datetime: actualStartDate,
+                end_datetime: actualEndDate,
+                reason: reason || null,
+                is_overnight: is_overnight || false,
+                primary_date: primary_date || null
+              }
+            };
+            console.log('✅ Update response:', JSON.stringify(responseData, null, 2));
+            res.status(201).json(responseData);
+          } else {
+            console.log('➕ Inserting new blocked date');
+            // Insert new blocked date record with exact datetime and overnight support
+            const insertData = {
+              listing_id: listingId,
+              start_datetime: actualStartDate,
+              end_datetime: actualEndDate,
+              reason: reason || null,
+              is_overnight: is_overnight || false,
+              primary_date: primary_date || null
+            };
+            console.log('Insert data:', JSON.stringify(insertData, null, 2));
+            
+            const result = await db.insert('blocked_dates', insertData);
+            console.log('Insert result:', result);
+            
+            const responseData = {
+              status: 'success',
+              message: 'Blocked date added successfully',
+              data: {
+                id: result.insertId,
+                listing_id: listingId,
+                start_datetime: actualStartDate,
+                end_datetime: actualEndDate,
+                reason: reason || null,
+                is_overnight: is_overnight || false,
+                primary_date: primary_date || null
+              }
+            };
+            console.log('✅ Insert response:', JSON.stringify(responseData, null, 2));
+            res.status(201).json(responseData);
+          }
+        } else {
+          // Handle date-only blocking (full day blocking)
+          const startDateObj = new Date(normalizedStartDate + 'T12:00:00');
+          const endDateObj = new Date(normalizedEndDate + 'T12:00:00');
+          const dayDiff = Math.floor((endDateObj.getTime() - startDateObj.getTime()) / (24 * 60 * 60 * 1000));
+          
+          if (dayDiff > 0) {
+            // Multi-day blocking
+            const connection = await db.getPool().getConnection();
+            await connection.beginTransaction();
+            
+            try {
+              const addedBlocks = [];
+              
+              for (let i = 0; i <= dayDiff; i++) {
+                const currentDateObj = new Date(startDateObj);
+                currentDateObj.setDate(currentDateObj.getDate() + i);
+                const year = currentDateObj.getFullYear();
+                const month = String(currentDateObj.getMonth() + 1).padStart(2, '0');
+                const day = String(currentDateObj.getDate()).padStart(2, '0');
+                const formattedDate = `${year}-${month}-${day}`;
+                
+                const startDateTime = `${formattedDate}T00:00:00`;
+                const endDateTime = `${formattedDate}T23:59:59`;
+                
+                const [result] = await connection.query(
+                  'INSERT INTO blocked_dates (listing_id, start_datetime, end_datetime, reason, is_overnight, primary_date) VALUES (?, ?, ?, ?, ?, ?)',
+                  [listingId, startDateTime, endDateTime, reason || null, false, null]
+                );
+                
+                addedBlocks.push({
+                  id: result.insertId,
+                  listing_id: listingId,
+                  start_datetime: startDateTime,
+                  end_datetime: endDateTime,
+                  reason: reason || null
+                });
+              }
+              
+              await connection.commit();
+              
+              res.status(201).json({
+                status: 'success',
+                data: addedBlocks
+              });
+            } catch (error) {
+              await connection.rollback();
+              throw error;
+            } finally {
+              connection.release();
+            }
+          } else {
+            // Single day blocking
+            const startDateTime = `${normalizedStartDate}T00:00:00`;
+            const endDateTime = `${normalizedStartDate}T23:59:59`;
+            
+            const result = await db.insert('blocked_dates', {
+              listing_id: listingId,
+              start_datetime: startDateTime,
+              end_datetime: endDateTime,
+              reason: reason || null,
+              is_overnight: false,
+              primary_date: null
+            });
+            
+            res.status(201).json({
+              status: 'success',
+              message: 'Blocked date added successfully',
+              data: {
+                id: result.insertId,
+                listing_id: listingId,
+                start_datetime: startDateTime,
+                end_datetime: endDateTime,
+                reason: reason || null,
+                is_overnight: false,
+                primary_date: null
+              }
+            });
+          }
+        }
+      } else if (availabilityMode === 'blocked-by-default') {
+        // In blocked-by-default mode, blocking dates means removing availability entries
+        if (useDateTime) {
+          const startDate = actualStartDate.split('T')[0];
+          const startTime = actualStartDate.split('T')[1] || '00:00:00';
+          const endTime = actualEndDate.split('T')[1] || '23:59:59';
+          
+          await db.query(
+            'DELETE FROM availability WHERE listing_id = ? AND date = ? AND start_time = ? AND end_time = ?',
+            [listingId, startDate, startTime, endTime]
+          );
+          
+          res.status(201).json({
+            status: 'success',
+            message: 'Date blocked successfully (availability removed)',
+            data: {
+              listing_id: listingId,
+              date: startDate,
+              start_time: startTime,
+              end_time: endTime,
+              action: 'availability_removed'
+            }
+          });
+        } else {
+          const startDateObj = new Date(normalizedStartDate + 'T12:00:00');
+          const endDateObj = new Date(normalizedEndDate + 'T12:00:00');
+          const dayDiff = Math.floor((endDateObj.getTime() - startDateObj.getTime()) / (24 * 60 * 60 * 1000));
+          
+          const removedDates = [];
+          
+          for (let i = 0; i <= dayDiff; i++) {
+            const currentDateObj = new Date(startDateObj);
+            currentDateObj.setDate(currentDateObj.getDate() + i);
+            const year = currentDateObj.getFullYear();
+            const month = String(currentDateObj.getMonth() + 1).padStart(2, '0');
+            const day = String(currentDateObj.getDate()).padStart(2, '0');
+            const currentDateStr = `${year}-${month}-${day}`;
+            
+            await db.query(
+              'DELETE FROM availability WHERE listing_id = ? AND date = ?',
+              [listingId, currentDateStr]
+            );
+            
+            removedDates.push(currentDateStr);
+          }
+          
+          res.status(201).json({
+            status: 'success',
+            message: 'Dates blocked successfully (availability removed)',
+            data: {
+              listing_id: listingId,
+              blocked_dates: removedDates,
+              action: 'availability_removed'
+            }
+          });
+        }
+      } else if (useDateTime) {
+        // Handle datetime-based blocking (from calendar with specific times) in available-by-default mode
+        const result = await db.insert('blocked_dates', {
+          listing_id: listingId,
+          start_datetime: actualStartDate,
+          end_datetime: actualEndDate,
+          reason: reason || null,
+          is_overnight: is_overnight || false,
+          primary_date: primary_date || null
+        });
+        
+        res.status(201).json({
+          status: 'success',
+          message: 'Blocked date added successfully',
+          data: {
+            id: result.insertId,
+            listing_id: listingId,
+            start_datetime: actualStartDate,
+            end_datetime: actualEndDate,
+            reason: reason || null,
+            is_overnight: is_overnight || false,
+            primary_date: primary_date || null
+          }
+        });
       } else {
-        // Just blocking a single day or time range within a day
-        const result = await db.query(
-          'INSERT INTO blocked_dates (listing_id, start_datetime, end_datetime, reason) VALUES (?, ?, ?, ?)',
-          [listingId, startDateTime, endDateTime, reason || null]
-        );
+        // Blocking a single day or time range within a day
+        
+        // Validate time range if it's time-specific
+        if (isTimeSpecificBlock) {
+          const startTime = new Date(startDateTime);
+          const endTime = new Date(endDateTime);
+          
+          // Allow any start/end time combination - no validation needed
+          
+          // Check for overlapping blocked times on the same date
+          const dateOnly = startDateTime.split('T')[0];
+          const overlappingBlocks = await db.query(
+            `SELECT * FROM blocked_dates 
+             WHERE listing_id = ? 
+             AND DATE(start_datetime) = ? 
+             AND (
+               (start_datetime <= ? AND end_datetime > ?) OR
+               (start_datetime < ? AND end_datetime >= ?) OR
+               (start_datetime >= ? AND end_datetime <= ?)
+             )`,
+            [listingId, dateOnly, startDateTime, startDateTime, endDateTime, endDateTime, startDateTime, endDateTime]
+          );
+          
+          if (overlappingBlocks.length > 0) {
+            return res.status(400).json({
+              status: 'error',
+              message: 'This time range overlaps with existing blocked times'
+            });
+          }
+        }
+        
+        const result = await db.insert('blocked_dates', {
+          listing_id: listingId,
+          start_datetime: startDateTime,
+          end_datetime: endDateTime,
+          reason: reason || null
+        });
         
         // Get created blocked date
         const [blockedDate] = await db.query(
@@ -1300,16 +1623,15 @@ const hostController = {
      * @param {Object} res - Express response object
      * @param {Function} next - Express next middleware function
      */
-    async addListingAvailability(req, res, next) {
+    async addAvailability(req, res, next) {
       try {
-        const userId = req.user.id;
         const { listingId } = req.params;
-        const { date, start_time, end_time, is_available = true, recurring, end_date } = req.body;
+        const { date, start_time, end_time, end_date, is_available, is_overnight, reason, recurring } = req.body;
         
         // Check if listing exists and belongs to user
         const [listing] = await db.query(
           'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-          [listingId, userId]
+          [listingId, req.user.id]
         );
         
         if (!listing) {
@@ -1318,7 +1640,55 @@ const hostController = {
             message: 'Listing not found or not owned by you'
           });
         }
+
+        // Get availability mode for this listing
+        const [listingSettings] = await db.query(
+          'SELECT availability_mode FROM listing_settings WHERE listing_id = ?',
+          [listingId]
+        );
         
+        const availabilityMode = listingSettings?.availability_mode || 'available-by-default';
+        
+        // In available-by-default mode, setting availability means removing blocked dates
+        // This makes the behavior consistent with blocking dates in blocked-by-default mode
+        if (availabilityMode === 'available-by-default') {
+          // Extract date and time components
+          let targetDate = date;
+          if (date.includes('T')) {
+            targetDate = date.split('T')[0];
+          }
+          
+          // Remove blocked dates that overlap with this availability slot
+          const startDateTime = `${targetDate}T${start_time || '00:00:00'}`;
+          const endDateTime = `${targetDate}T${end_time || '23:59:59'}`;
+          
+          // Remove overlapping blocked dates
+          await db.query(
+            `DELETE FROM blocked_dates 
+             WHERE listing_id = ? 
+             AND DATE(start_datetime) = ? 
+             AND (
+               (start_datetime <= ? AND end_datetime >= ?) OR
+               (start_datetime <= ? AND end_datetime >= ?) OR
+               (start_datetime >= ? AND end_datetime <= ?)
+             )`,
+            [listingId, targetDate, startDateTime, startDateTime, endDateTime, endDateTime, startDateTime, endDateTime]
+          );
+          
+          return res.status(201).json({
+            status: 'success',
+            message: 'Availability set successfully (blocked dates removed)',
+            data: {
+              listing_id: listingId,
+              date: targetDate,
+              start_time: start_time || '00:00:00',
+              end_time: end_time || '23:59:59',
+              action: 'blocked_dates_removed'
+            }
+          });
+        }
+        
+        // For blocked-by-default mode, continue with normal availability table logic
         // Validate and normalize date without timezone conversion
         let normalizedDate;
         try {
@@ -1522,38 +1892,43 @@ const hostController = {
             [listingId, formattedDate, start_time, end_time]
           );
           
-          let availabilityId;
-          
           if (existingAvailability) {
             // Update existing availability
             await db.query(
-              'UPDATE availability SET is_available = ? WHERE id = ?',
-              [is_available, existingAvailability.id]
+              'UPDATE availability SET is_available = ?, end_date = ?, is_overnight = ?, reason = ? WHERE id = ?',
+              [is_available !== false, end_date || null, is_overnight || false, reason || null, existingAvailability.id]
             );
-            availabilityId = existingAvailability.id;
           } else {
-            // Add new availability
-            const result = await db.query(
-              'INSERT INTO availability (listing_id, date, start_time, end_time, is_available) VALUES (?, ?, ?, ?, ?)',
-              [listingId, formattedDate, start_time, end_time, is_available]
-            );
-            availabilityId = result.insertId;
+            // Insert availability record with overnight support
+            await db.insert('availability', {
+              listing_id: listingId,
+              date: normalizedDate,
+              start_time: start_time,
+              end_time: end_time,
+              end_date: end_date || null,
+              is_available: is_available !== false,
+              is_overnight: is_overnight || false,
+              reason: reason || null
+            });
           }
-          
-          // Get created/updated availability
-          const [availability] = await db.query(
-            'SELECT * FROM availability WHERE id = ?',
-            [availabilityId]
-          );
-          
-          res.status(201).json({
-            status: 'success',
-            data: availability
-          });
         }
+        
+        res.status(201).json({
+          status: 'success',
+          message: 'Availability added successfully',
+          data: {
+            listing_id: listingId,
+            date: normalizedDate,
+            start_time,
+            end_time,
+            end_date: end_date || null,
+            is_available: is_available !== false,
+            is_overnight: is_overnight || false
+          }
+        });
       } catch (error) {
         console.error('Error adding availability:', error);
-        next(errorHandler(error));
+        next(error);
       }
     },
     

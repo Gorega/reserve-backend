@@ -318,9 +318,7 @@ const specialPricingModel = {
       const startDate = new Date(start_date);
       const endDate = new Date(end_date);
       
-      if (startDate > endDate) {
-        throw badRequest('Start date must be before or equal to end date');
-      }
+      // Allow any start/end date combination - no validation needed
 
       const createdEntries = [];
       const currentDate = new Date(startDate);

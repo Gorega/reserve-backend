@@ -1299,6 +1299,118 @@ const listingController = {
   },
 
   /**
+   * Calculate unified pricing for a listing based on duration
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async calculateUnifiedPricing(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { start_datetime, end_datetime, unit_type } = req.body;
+
+      if (!start_datetime || !end_datetime) {
+        return next(badRequest('Start and end datetime are required'));
+      }
+
+      // Get listing with pricing options
+      const listing = await listingModel.getById(id);
+
+      const startDate = new Date(start_datetime);
+      const endDate = new Date(end_datetime);
+
+      // Allow any start/end datetime combination - no validation needed
+
+      // Calculate unified pricing based on duration
+      let unifiedPricing = {};
+      
+      if (listing.pricing_options && listing.pricing_options.length > 0) {
+        // Find the appropriate pricing option
+        const targetUnitType = unit_type || listing.unit_type;
+        const pricingOption = listing.pricing_options.find(option => 
+          option.unit_type === targetUnitType && option.is_default
+        ) || listing.pricing_options.find(option => 
+          option.unit_type === targetUnitType
+        ) || listing.pricing_options.find(option => option.is_default) || listing.pricing_options[0];
+
+        // Calculate time difference based on unit type
+        let timeDiffMs = endDate - startDate;
+        let requestedUnits = 0;
+        
+        switch (pricingOption.unit_type) {
+          case 'hour':
+          case 'session':
+            requestedUnits = Math.ceil(timeDiffMs / (1000 * 60 * 60));
+            break;
+          case 'day':
+          case 'night':
+            requestedUnits = Math.ceil(timeDiffMs / (1000 * 60 * 60 * 24));
+            break;
+          case 'week':
+            requestedUnits = Math.ceil(timeDiffMs / (1000 * 60 * 60 * 24 * 7));
+            break;
+          case 'month':
+            requestedUnits = Math.ceil(timeDiffMs / (1000 * 60 * 60 * 24 * 30));
+            break;
+          default:
+            requestedUnits = Math.ceil(timeDiffMs / (1000 * 60 * 60));
+        }
+
+        // For unified pricing, we treat the price as the total for the duration
+        // If user requests time that fits within one duration block, they pay the unified price
+        // If they need more, they pay for additional blocks
+        const durationBlocks = Math.max(
+          Math.ceil(requestedUnits / pricingOption.duration),
+          pricingOption.minimum_units || 1
+        );
+
+        // Check maximum units constraint
+        if (pricingOption.maximum_units && durationBlocks > pricingOption.maximum_units) {
+          return next(badRequest(`Maximum ${pricingOption.maximum_units} ${pricingOption.unit_type} blocks allowed`));
+        }
+
+        // Calculate unified pricing - price is for the entire duration, not per unit
+        const totalPrice = durationBlocks * pricingOption.price;
+        const effectiveDuration = durationBlocks * pricingOption.duration;
+        
+        unifiedPricing = {
+          pricingOption: pricingOption,
+          unifiedPrice: pricingOption.price, // Price for the entire duration block
+          unifiedDuration: pricingOption.duration, // Duration of one block
+          blocksNeeded: durationBlocks,
+          totalPrice: totalPrice, // Total for all blocks needed
+          effectiveDuration: effectiveDuration, // Total duration covered
+          pricePerUnit: pricingOption.price / pricingOption.duration, // For display only
+          unitType: pricingOption.unit_type,
+          minimumUnits: pricingOption.minimum_units || 1,
+          maximumUnits: pricingOption.maximum_units,
+          requestedUnits: requestedUnits
+        };
+      } else {
+        // Fallback to legacy pricing
+        return next(badRequest('No pricing options available for this listing'));
+      }
+
+      // Calculate confirmation fee (10%)
+      const confirmationFeePercent = 10;
+      const confirmationFee = unifiedPricing.totalPrice * (confirmationFeePercent / 100);
+
+      res.status(200).json({
+        status: 'success',
+        data: {
+          ...unifiedPricing,
+          confirmationFee,
+          confirmationFeePercent,
+          finalTotal: unifiedPricing.totalPrice
+        }
+      });
+    } catch (error) {
+      console.error('Error calculating unified pricing:', error);
+      next(error);
+    }
+  },
+
+  /**
    * Calculate smart pricing for a listing
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
@@ -1319,9 +1431,7 @@ const listingController = {
       const startDate = new Date(start_datetime);
       const endDate = new Date(end_datetime);
 
-      if (startDate >= endDate) {
-        return next(badRequest('End datetime must be after start datetime'));
-      }
+      // Allow any start/end datetime combination - no validation needed
 
       // Calculate smart pricing
       const smartPricing = smartPricingUtils.calculateSmartPrice(

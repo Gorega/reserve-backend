@@ -28,12 +28,37 @@ const bookingController = {
       if (req.query.start_date) filters.start_date = req.query.start_date;
       if (req.query.end_date) filters.end_date = req.query.end_date;
       
-      // Filter by user role
-      if (req.user.is_provider) {
-        filters.provider_id = req.user.id;
-      } else {
-        filters.user_id = req.user.id;
+      // Filter by user role - add validation
+      if (!req.user || !req.user.id) {
+        return next(badRequest('User authentication required'));
       }
+      
+      // Debug user information
+      console.log('User info:', {
+        id: req.user.id,
+        is_provider: req.user.is_provider,
+        email: req.user.email
+      });
+      
+      // FIXED: Users can be both providers AND customers
+      // Show bookings where they are either the customer OR the provider
+      if (req.user.is_provider) {
+        // For providers, show bookings for their listings AND bookings they made as customers
+        filters.user_or_provider_id = req.user.id;
+        console.log('Filtering by user_or_provider_id:', req.user.id);
+      } else {
+        // For regular users, only show their bookings as customers
+        filters.user_id = req.user.id;
+        console.log('Filtering by user_id:', req.user.id);
+      }
+      
+      console.log('Applied filters:', filters);
+      
+      // TEMPORARY: Test without user filtering to see if data is returned
+      const testFilters = { ...filters };
+      delete testFilters.user_id;
+      delete testFilters.provider_id;
+      console.log('Testing with filters (no user filtering):', testFilters);
       
       // Get bookings
       const bookings = await bookingModel.getAll(filters, page, limit);
@@ -71,6 +96,12 @@ const bookingController = {
         if (filters.provider_id) {
           filterConditions.push('l.user_id = ?');
           countParams.push(Number(filters.provider_id));
+        }
+        
+        if (filters.user_or_provider_id) {
+          filterConditions.push('(b.user_id = ? OR l.user_id = ?)');
+          countParams.push(Number(filters.user_or_provider_id));
+          countParams.push(Number(filters.user_or_provider_id));
         }
         
         if (filters.status) {

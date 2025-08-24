@@ -98,8 +98,11 @@ CREATE TABLE availability (
     date DATE NOT NULL,
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
+    end_date DATE NULL,
     is_available BOOLEAN DEFAULT TRUE,
+    is_overnight BOOLEAN DEFAULT FALSE,
     is_recurring BOOLEAN DEFAULT FALSE,
+    reason TEXT,
     recurrence_pattern ENUM('daily', 'weekly', 'weekdays', 'weekends') NULL,
     slot_duration INT, -- in minutes, for appointment-based services
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -138,7 +141,7 @@ CREATE TABLE bookings (
 CREATE TABLE payments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     booking_id INT NOT NULL,
-    method ENUM('card', 'cash_deposit', 'bank_transfer', 'other') NOT NULL,
+    method ENUM('card', 'cash', 'bank_transfer', 'other') NOT NULL,
     amount DECIMAL(10,2),
     deposit_amount DECIMAL(10,2) DEFAULT 0,
     remaining_amount DECIMAL(10,2) DEFAULT 0,
@@ -366,13 +369,15 @@ CREATE TABLE blocked_dates (
     start_datetime DATETIME NOT NULL,
     end_datetime DATETIME NOT NULL,
     reason TEXT,
+    is_overnight BOOLEAN DEFAULT FALSE,
+    primary_date DATE NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
 );
 
 CREATE TABLE listing_settings (
     listing_id INT PRIMARY KEY,
-    availability_mode ENUM('available-by-default', 'blocked-by-default') DEFAULT 'available-by-default',
+    availability_mode ENUM('available-by-default', 'blocked-by-default') DEFAULT 'blocked-by-default',
     min_advance_booking_hours INT DEFAULT 24,
     max_advance_booking_days INT DEFAULT 365,
     instant_booking_enabled BOOLEAN DEFAULT FALSE,

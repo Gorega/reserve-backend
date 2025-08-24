@@ -93,7 +93,9 @@ const blockedDatesController = {
               end_datetime: endDateTime,
               reason: blocked.reason || '',
               created_at: blocked.created_at,
-              is_available: false
+              is_available: false,
+              is_overnight: blocked.is_overnight || false,
+              primary_date: blocked.primary_date || null
             };
           } catch (err) {
             console.error('Error formatting blocked date:', err, 'for record:', blocked);
@@ -104,7 +106,9 @@ const blockedDatesController = {
               end_datetime: null,
               reason: blocked.reason || 'Error parsing date/time',
               created_at: blocked.created_at,
-              is_available: false
+              is_available: false,
+              is_overnight: blocked.is_overnight || false,
+              primary_date: blocked.primary_date || null
             };
           }
         });
@@ -175,7 +179,7 @@ const blockedDatesController = {
         availability_mode: availabilityMode // Include mode in response
       });
     } catch (error) {
-      next(errorHandler(error));
+      next(error);
     }
   },
   
@@ -188,7 +192,7 @@ const blockedDatesController = {
   async addBlockedDate(req, res, next) {
     try {
       const { listingId } = req.params;
-      const { start_datetime, end_datetime, reason } = req.body;
+      const { start_datetime, end_datetime, reason, is_overnight, primary_date } = req.body;
       
       // Check if listing exists and belongs to the user
       const listing = await db.getById('listings', listingId);
@@ -213,18 +217,13 @@ const blockedDatesController = {
         const endDate = new Date(end_datetime);
         
         if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Invalid date format'
-        });
-      }
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid date format'
+          });
+        }
       
-      if (startDate >= endDate) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Start date must be before end date'
-        });
-      }
+      // Allow any start/end time combination - no validation needed
       } catch (err) {
         return res.status(400).json({
           status: 'error',
@@ -232,43 +231,31 @@ const blockedDatesController = {
         });
       }
       
-      // Check for conflicts with existing bookings using our date utility
-      const bookings = await db.query(`
-        SELECT * FROM bookings 
-        WHERE listing_id = ? AND status IN ('pending', 'confirmed')
-        AND (
-          (start_datetime <= ? AND end_datetime >= ?) OR
-          (start_datetime <= ? AND end_datetime >= ?) OR
-          (start_datetime >= ? AND end_datetime <= ?)
-        )
-      `, [listingId, start_datetime, start_datetime, end_datetime, end_datetime, start_datetime, end_datetime]);
+      // Insert blocked date with overnight support
+      const insertQuery = `
+        INSERT INTO blocked_dates (listing_id, start_datetime, end_datetime, reason, is_overnight, primary_date)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `;
       
-      if (bookings.length > 0) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Cannot block dates that have existing bookings'
-        });
-      }
-      
-      // Add blocked date
-      const blockedDateData = {
-        listing_id: listingId,
-        start_datetime,
-        end_datetime,
-        reason: reason || null
-      };
-      
-      const result = await db.insert('blocked_dates', blockedDateData);
-      
-      // Get created blocked date
-      const blockedDate = await db.getById('blocked_dates', result.insertId);
-      
+      const [result] = await db.execute(insertQuery, [
+        listingId, start_datetime, end_datetime, reason || null, is_overnight || false, primary_date || null
+      ]);
+
       res.status(201).json({
         status: 'success',
-        data: blockedDate
+        message: 'Blocked date added successfully',
+        data: {
+          id: result.insertId,
+          listing_id: listingId,
+          start_datetime,
+          end_datetime,
+          reason,
+          is_overnight: is_overnight || false,
+          primary_date: primary_date || null
+        }
       });
     } catch (error) {
-      next(errorHandler(error));
+      next(error);
     }
   },
   
@@ -322,12 +309,7 @@ const blockedDatesController = {
           const startDate = new Date(updateData.start_datetime);
           const endDate = new Date(updateData.end_datetime);
           
-          if (startDate >= endDate) {
-          return res.status(400).json({
-            status: 'error',
-            message: 'Start date must be before end date'
-          });
-        }
+          // Allow any start/end time combination - no validation needed
         } catch (err) {
           return res.status(400).json({
             status: 'error',
@@ -339,12 +321,7 @@ const blockedDatesController = {
           const startDate = new Date(updateData.start_datetime);
           const endDate = new Date(blockedDate.end_datetime);
           
-          if (startDate >= endDate) {
-          return res.status(400).json({
-            status: 'error',
-            message: 'Start date must be before end date'
-          });
-        }
+          // Allow any start/end time combination - no validation needed
         } catch (err) {
           return res.status(400).json({
             status: 'error',
@@ -356,39 +333,11 @@ const blockedDatesController = {
           const startDate = new Date(blockedDate.start_datetime);
           const endDate = new Date(updateData.end_datetime);
           
-          if (startDate >= endDate) {
-          return res.status(400).json({
-            status: 'error',
-            message: 'Start date must be before end date'
-          });
-        }
+          // Allow any start/end time combination - no validation needed
         } catch (err) {
           return res.status(400).json({
             status: 'error',
             message: 'Invalid date format: ' + err.message
-          });
-        }
-      }
-      
-      // Check for conflicts with existing bookings
-      if (updateData.start_datetime || updateData.end_datetime) {
-        const startDatetime = updateData.start_datetime || blockedDate.start_datetime;
-        const endDatetime = updateData.end_datetime || blockedDate.end_datetime;
-        
-        const bookings = await db.query(`
-          SELECT * FROM bookings 
-          WHERE listing_id = ? AND status IN ('pending', 'confirmed')
-          AND (
-            (start_datetime <= ? AND end_datetime >= ?) OR
-            (start_datetime <= ? AND end_datetime >= ?) OR
-            (start_datetime >= ? AND end_datetime <= ?)
-          )
-        `, [blockedDate.listing_id, startDatetime, startDatetime, endDatetime, endDatetime, startDatetime, endDatetime]);
-        
-        if (bookings.length > 0) {
-          return res.status(400).json({
-            status: 'error',
-            message: 'Cannot block dates that have existing bookings'
           });
         }
       }
@@ -404,7 +353,7 @@ const blockedDatesController = {
         data: updatedBlockedDate
       });
     } catch (error) {
-      next(errorHandler(error));
+      next(error);
     }
   },
   
@@ -441,7 +390,7 @@ const blockedDatesController = {
       
       res.status(204).end();
     } catch (error) {
-      next(errorHandler(error));
+      next(error);
     }
   }
 };

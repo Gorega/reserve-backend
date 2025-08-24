@@ -305,17 +305,22 @@ const listingModel = {
       
       const listings = await db.query(query, params);
       
-      // Add pricing options with duration for each listing
+      // Add pricing options with unified duration pricing for each listing
       if (listings.length > 0) {
         for (const listing of listings) {
           // Get pricing options for this listing
           listing.pricing_options = await pricingOptionModel.getByListingId(listing.id);
           
-          // Add duration to the main listing object for the default pricing option
+          // Add unified pricing information to the main listing object
           if (listing.pricing_options && listing.pricing_options.length > 0) {
             const defaultOption = listing.pricing_options.find(option => option.is_default) || listing.pricing_options[0];
             listing.price_duration = defaultOption.duration || 1;
             listing.price_unit_type = defaultOption.unit_type || listing.unit_type;
+            
+            // Calculate unified price for the duration period
+            listing.unified_price = defaultOption.price;
+            listing.unified_duration = defaultOption.duration || 1;
+            listing.price_per_unit = listing.unified_price / listing.unified_duration;
           }
         }
       }
@@ -369,11 +374,16 @@ const listingModel = {
       // Get pricing options with duration
       listing.pricing_options = await pricingOptionModel.getByListingId(id);
       
-      // Add duration to the main listing object for the default pricing option
+      // Add unified pricing information to the main listing object
       if (listing.pricing_options && listing.pricing_options.length > 0) {
         const defaultOption = listing.pricing_options.find(option => option.is_default) || listing.pricing_options[0];
         listing.price_duration = defaultOption.duration || 1;
         listing.price_unit_type = defaultOption.unit_type || listing.unit_type;
+        
+        // Calculate unified price for the duration period
+        listing.unified_price = defaultOption.price;
+        listing.unified_duration = defaultOption.duration || 1;
+        listing.price_per_unit = listing.unified_price / listing.unified_duration;
       }
       
       // Get special pricing for this listing
@@ -903,7 +913,7 @@ const listingModel = {
             ) VALUES (?, ?, ?, ?, ?)`,
             [
               listingId,
-              'available-by-default',
+              'blocked-by-default',
               24,
               365,
               instant_booking ? 1 : 0

@@ -90,7 +90,7 @@ router.get('/listings/:listingId/availability', hostController.getListingAvailab
  * @desc    Add availability for a specific listing
  * @access  Private
  */
-router.post('/listings/:listingId/availability', hostController.addListingAvailability);
+router.post('/listings/:listingId/availability', hostController.addAvailability);
 
 /**
  * @route   DELETE /api/hosts/listings/:listingId/availability/:availabilityId
