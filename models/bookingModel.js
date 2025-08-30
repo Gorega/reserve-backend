@@ -3,7 +3,6 @@ const { notFound, badRequest } = require('../utils/errorHandler');
 const listingModel = require('./listingModel');
 const smartPricingUtils = require('../utils/smartPricingUtils');
 const specialPricingModel = require('./specialPricingModel');
-const pricingOptionModel = require('./pricingOptionModel');
 
 /**
  * Booking Model
@@ -360,9 +359,6 @@ const bookingModel = {
       
       const listing = listings[0];
       
-      // Fetch pricing options for this listing
-      listing.pricing_options = await pricingOptionModel.getByListingId(listing_id);
-      
       // Check if the listing is available for the requested time
       const isAvailable = await listingModel.checkAvailability(
         listing_id,
@@ -534,6 +530,17 @@ const bookingModel = {
       
       const bookingId = bookingResult.insertId;
       
+      // Synchronize available slots after creating a booking
+      try {
+        // Import the synchronizeAvailableSlots function from hostController
+        // We need to require it here to avoid circular dependencies
+        const { synchronizeAvailableSlots } = require('../controllers/hostController');
+        await synchronizeAvailableSlots(listing_id);
+      } catch (syncError) {
+        console.error('Error synchronizing available slots after booking creation:', syncError);
+        // Don't fail the booking creation if synchronization fails
+      }
+      
       // Return the created booking
       return this.getById(bookingId);
     } catch (error) {
@@ -601,6 +608,15 @@ const bookingModel = {
       
       // Get updated booking
       const updatedBooking = await this.getById(id);
+      
+      // Synchronize available slots after updating a booking
+      try {
+        const { synchronizeAvailableSlots } = require('../controllers/hostController');
+        await synchronizeAvailableSlots(booking.listing_id);
+      } catch (syncError) {
+        console.error('Error synchronizing available slots after booking update:', syncError);
+        // Don't fail the booking update if synchronization fails
+      }
       
       return updatedBooking;
     } catch (error) {
@@ -746,6 +762,15 @@ const bookingModel = {
         
         // Get updated booking
         const cancelledBooking = await this.getById(id);
+        
+        // Synchronize available slots after cancelling a booking
+        try {
+          const { synchronizeAvailableSlots } = require('../controllers/hostController');
+          await synchronizeAvailableSlots(booking.listing_id);
+        } catch (syncError) {
+          console.error('Error synchronizing available slots after booking cancellation:', syncError);
+          // Don't fail the booking cancellation if synchronization fails
+        }
         
         // Add refund details to the response
         return {

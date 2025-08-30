@@ -80,24 +80,10 @@ router.delete('/listings/:listingId/blocked-dates/:blockId', hostController.dele
 
 /**
  * @route   GET /api/hosts/listings/:listingId/availability
- * @desc    Get availability settings for a specific listing
+ * @desc    Get availability mode for a specific listing
  * @access  Private
  */
 router.get('/listings/:listingId/availability', hostController.getListingAvailability);
-
-/**
- * @route   POST /api/hosts/listings/:listingId/availability
- * @desc    Add availability for a specific listing
- * @access  Private
- */
-router.post('/listings/:listingId/availability', hostController.addAvailability);
-
-/**
- * @route   DELETE /api/hosts/listings/:listingId/availability/:availabilityId
- * @desc    Remove availability for a specific listing
- * @access  Private
- */
-router.delete('/listings/:listingId/availability/:availabilityId', hostController.deleteAvailability);
 
 /**
  * @route   PUT /api/hosts/listings/:listingId/availability/mode
@@ -105,6 +91,41 @@ router.delete('/listings/:listingId/availability/:availabilityId', hostControlle
  * @access  Private
  */
 router.put('/listings/:listingId/availability/mode', hostController.setAvailabilityMode);
+
+/**
+ * @route   GET /api/hosts/listings/:listingId/available-slots
+ * @desc    Get available time slots for a specific listing
+ * @access  Private
+ */
+router.get('/listings/:listingId/available-slots', hostController.getListingAvailableSlots);
+
+/**
+ * @route   POST /api/hosts/listings/:listingId/available-slots
+ * @desc    Add available slots directly to available_slots table
+ * @access  Private
+ */
+router.post('/listings/:listingId/available-slots', hostController.addAvailableSlots);
+
+/**
+ * @route   DELETE /api/hosts/listings/:listingId/available-slots/:slotId
+ * @desc    Delete available slot from available_slots table
+ * @access  Private
+ */
+router.delete('/listings/:listingId/available-slots/:slotId', hostController.deleteAvailableSlot);
+
+/**
+ * @route   POST /api/hosts/listings/:listingId/synchronize-slots
+ * @desc    Synchronize available slots for a specific listing
+ * @access  Private
+ */
+router.post('/listings/:listingId/synchronize-slots', hostController.synchronizeListingAvailableSlots);
+
+/**
+ * @route   POST /api/hosts/listings/:listingId/initialize-slots
+ * @desc    Initialize available slots table and data for a specific listing
+ * @access  Private
+ */
+router.post('/listings/:listingId/initialize-slots', hostController.initializeListingAvailableSlots);
 
 /**
  * @route   GET /api/hosts/qualifications

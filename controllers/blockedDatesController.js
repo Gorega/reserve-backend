@@ -335,8 +335,7 @@ const blockedDatesController = {
    */
   async getGuestAvailability(req, res, next) {
     try {
-      const { id } = req.params;
-      const listingId = parseInt(id);
+      const { listingId } = req.params;
       
       console.log(`[DEBUG] Getting guest availability for listing ${listingId}`);
       

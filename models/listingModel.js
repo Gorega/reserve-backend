@@ -196,9 +196,7 @@ const listingModel = {
               // Already has time component
               formattedEndDate = endDate.toISOString().slice(0, 19).replace('T', ' ');
             }
-            
-            console.log(`Filtering dates from ${formattedStartDate} to ${formattedEndDate}`);
-            
+                        
             // Exclude listings that have blocked dates or bookings during the requested period
             filterConditions.push(`
               l.id NOT IN (
@@ -1569,6 +1567,34 @@ const listingModel = {
       
       const availabilityMode = listingSettings?.availability_mode || 'available-by-default';
       
+      // First, try to use the available_slots table for optimized checking
+      try {
+        // Check if the time slot is in the available_slots table
+        const availableSlotsQuery = `
+          SELECT COUNT(*) as slot_count
+          FROM available_slots
+          WHERE listing_id = ?
+          AND start_datetime <= ?
+          AND end_datetime >= ?
+          AND is_available = TRUE
+        `;
+        
+        const [availableSlotsResult] = await db.query(availableSlotsQuery, [
+          listingId,
+          formattedStartDatetime,
+          formattedEndDatetime
+        ]);
+        
+        // If we have at least one matching available slot, the time is available
+        if (availableSlotsResult.slot_count > 0) {
+          return true;
+        }
+      } catch (error) {
+        console.error('Error checking available_slots table:', error);
+        // If there's an error with the available_slots table, fall back to traditional checking
+      }
+      
+      // If available_slots check didn't return true, fall back to traditional availability checking
       if (availabilityMode === 'blocked-by-default') {
         // In blocked-by-default mode, check if dates are explicitly available
         const availabilityQuery = `

@@ -33,32 +33,21 @@ const bookingController = {
         return next(badRequest('User authentication required'));
       }
       
-      // Debug user information
-      console.log('User info:', {
-        id: req.user.id,
-        is_provider: req.user.is_provider,
-        email: req.user.email
-      });
       
       // FIXED: Users can be both providers AND customers
       // Show bookings where they are either the customer OR the provider
       if (req.user.is_provider) {
         // For providers, show bookings for their listings AND bookings they made as customers
         filters.user_or_provider_id = req.user.id;
-        console.log('Filtering by user_or_provider_id:', req.user.id);
       } else {
         // For regular users, only show their bookings as customers
         filters.user_id = req.user.id;
-        console.log('Filtering by user_id:', req.user.id);
       }
-      
-      console.log('Applied filters:', filters);
-      
+            
       // TEMPORARY: Test without user filtering to see if data is returned
       const testFilters = { ...filters };
       delete testFilters.user_id;
       delete testFilters.provider_id;
-      console.log('Testing with filters (no user filtering):', testFilters);
       
       // Get bookings
       const bookings = await bookingModel.getAll(filters, page, limit);
@@ -346,9 +335,7 @@ const bookingController = {
     try {
       const { listingId } = req.params;
       const { start_date, end_date } = req.query;
-      
-      console.log(`[DEBUG] Getting bookings for listing ${listingId}`);
-      
+            
       // Check if listing exists
       const listing = await listingModel.getById(listingId);
       if (!listing) {
@@ -393,13 +380,9 @@ const bookingController = {
       
       query += ` ORDER BY b.start_datetime ASC`;
       
-      console.log(`[DEBUG] Executing query:`, query);
-      console.log(`[DEBUG] With params:`, params);
       
       const bookings = await db.query(query, params);
-      
-      console.log(`[DEBUG] Found ${bookings.length} bookings for listing ${listingId}`);
-      
+            
       // Format bookings for guest availability display
       const formattedBookings = bookings.map(booking => ({
         id: booking.id,
