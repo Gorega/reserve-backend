@@ -21,14 +21,16 @@ CREATE TABLE listings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
     category_id INT NOT NULL,
-    listing_type ENUM('property', 'vehicle', 'service', 'venue', 'subscription') NOT NULL,
+    listing_type ENUM('property', 'vehicle', 'service') NOT NULL,
     title VARCHAR(200) NOT NULL,
     description TEXT,
     price_per_hour DECIMAL(10,2),
     price_per_day DECIMAL(10,2),
     price_per_half_night DECIMAL(10,2),
-    unit_type ENUM('hour', 'day', 'session', 'night', 'week', 'month') DEFAULT 'hour',
+    unit_type ENUM('hour', 'day', 'night') DEFAULT 'hour',
     is_hourly BOOLEAN DEFAULT TRUE,
+    booking_type ENUM('hourly', 'daily', 'night', 'appointment') DEFAULT 'hourly',
+    slot_duration INT, -- in minutes, for cars/appointments if needed
     location TEXT,
     latitude DECIMAL(10,6),
     longitude DECIMAL(10,6),
@@ -47,7 +49,7 @@ CREATE TABLE pricing_options (
     id INT AUTO_INCREMENT PRIMARY KEY,
     listing_id INT NOT NULL,
     price DECIMAL(10,2) NOT NULL,
-    unit_type ENUM('hour', 'day', 'night', 'week', 'month', 'session') NOT NULL,
+    unit_type ENUM('hour', 'day', 'night') NOT NULL,
     duration INT NOT NULL DEFAULT 1,
     minimum_units INT NOT NULL DEFAULT 1,
     maximum_units INT NULL,
@@ -77,6 +79,10 @@ CREATE TABLE listing_property_details (
     room_type VARCHAR(50),
     min_nights INT DEFAULT 1,
     max_nights INT,
+    night_check_in_time TIME DEFAULT '18:00:00', -- Default check-in time for night bookings (e.g., 6 PM)
+    night_check_out_time TIME DEFAULT '06:00:00', -- Default check-out time for night bookings (e.g., 6 AM)
+    day_check_in_time TIME DEFAULT '00:00:00', -- Default check-in time for day bookings (e.g., midnight)
+    day_check_out_time TIME DEFAULT '23:59:59', -- Default check-out time for day bookings (e.g., 11:59 PM)
     FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
 );
 
@@ -89,6 +95,9 @@ CREATE TABLE listing_car_details (
     seats INT,
     fuel_type VARCHAR(50),
     mileage INT,
+    min_rental_duration INT DEFAULT 60, -- Minimum rental duration in minutes (e.g., 1 hour)
+    max_rental_duration INT, -- Maximum rental duration in minutes (optional)
+    hourly_increment INT DEFAULT 60, -- Rental duration increment in minutes (e.g., can book in 1-hour increments)
     FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
 );
 
@@ -105,9 +114,12 @@ CREATE TABLE availability (
     reason TEXT,
     recurrence_pattern ENUM('daily', 'weekly', 'weekdays', 'weekends') NULL,
     slot_duration INT, -- in minutes, for appointment-based services
+    booking_type ENUM('hourly', 'daily', 'night', 'appointment') NULL, -- to override listing's default booking type if needed
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    INDEX idx_availability_listing_date (listing_id, date),
+    INDEX idx_availability_listing_date_time (listing_id, date, start_time, end_time)
 );
 
 CREATE TABLE bookings (
@@ -116,7 +128,7 @@ CREATE TABLE bookings (
     user_id INT NOT NULL,
     start_datetime DATETIME NOT NULL,
     end_datetime DATETIME NOT NULL,
-    booking_type ENUM('hourly', 'daily', 'night', 'appointment', 'subscription') DEFAULT 'hourly',
+    booking_type ENUM('hourly', 'daily', 'night', 'appointment') DEFAULT 'hourly',
     guests_count INT DEFAULT 1,
     total_price DECIMAL(10,2) NOT NULL,
     deposit_amount DECIMAL(10,2) DEFAULT 0,
@@ -131,11 +143,19 @@ CREATE TABLE bookings (
     notes TEXT,
     pricing_option_id INT NULL,
     units_booked INT DEFAULT 1,
+    appointment_slot_id INT NULL, -- Reference to predefined appointment slot if applicable
+    hold_id INT NULL, -- Reference to reservation hold if this booking was created from a hold
+    check_in_time TIME NULL, -- Actual check-in time, can differ from start_datetime
+    check_out_time TIME NULL, -- Actual check-out time, can differ from end_datetime
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (listing_id) REFERENCES listings(id),
     FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (pricing_option_id) REFERENCES pricing_options(id)
+    FOREIGN KEY (pricing_option_id) REFERENCES pricing_options(id),
+    FOREIGN KEY (appointment_slot_id) REFERENCES appointment_slots(id),
+    INDEX idx_bookings_listing_dates (listing_id, start_datetime, end_datetime),
+    INDEX idx_bookings_user (user_id),
+    INDEX idx_bookings_status (status)
 );
 
 CREATE TABLE payments (
@@ -352,14 +372,17 @@ CREATE TABLE service_details (
     id INT AUTO_INCREMENT PRIMARY KEY,
     listing_id INT NOT NULL,
     service_type ENUM('makeup', 'hair', 'nails', 'skin_care', 'photography', 'cleaning', 'personal_training', 'medical', 'massage', 'other') NOT NULL,
-    service_duration INT, -- in minutes
-    preparation_time INT, -- in minutes
-    cleanup_time INT, -- in minutes
+    service_duration INT NOT NULL, -- in minutes, required for appointment booking
+    preparation_time INT DEFAULT 0, -- in minutes
+    cleanup_time INT DEFAULT 0, -- in minutes
     brings_equipment BOOLEAN DEFAULT FALSE,
     remote_service BOOLEAN DEFAULT FALSE,
     experience_years INT,
     appointment_required BOOLEAN DEFAULT TRUE,
-    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+    default_slot_duration INT, -- in minutes, for predefined appointment slots
+    max_concurrent_bookings INT DEFAULT 1, -- how many appointments can be booked in the same time slot
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    INDEX idx_service_details_listing (listing_id)
 );
 
 
@@ -408,6 +431,43 @@ CREATE TABLE listing_subscription_details (
     includes_classes BOOLEAN DEFAULT FALSE,
     max_visits_per_week INT,
     FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+-- Table for temporary reservation holds to prevent double booking
+CREATE TABLE reservation_holds (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id INT NOT NULL,
+    user_id INT NOT NULL,
+    start_datetime DATETIME NOT NULL,
+    end_datetime DATETIME NOT NULL,
+    booking_type ENUM('hourly', 'daily', 'night', 'appointment') NOT NULL,
+    expires_at DATETIME NOT NULL, -- When this hold expires if not confirmed
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_reservation_holds_listing_dates (listing_id, start_datetime, end_datetime),
+    INDEX idx_reservation_holds_expiry (expires_at)
+);
+
+-- Table for predefined appointment slots (especially for service providers)
+CREATE TABLE appointment_slots (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id INT NOT NULL,
+    day_of_week ENUM('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday') NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    is_available BOOLEAN DEFAULT TRUE,
+    max_bookings INT DEFAULT 1, -- For group appointments
+    slot_duration INT NOT NULL, -- in minutes
+    buffer_before INT DEFAULT 0, -- buffer time before appointment in minutes
+    buffer_after INT DEFAULT 0, -- buffer time after appointment in minutes
+    is_recurring BOOLEAN DEFAULT TRUE,
+    start_date DATE NULL, -- if not recurring, specific date
+    end_date DATE NULL, -- if temporary schedule
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    INDEX idx_appointment_slots_listing_day (listing_id, day_of_week)
 );
 
 

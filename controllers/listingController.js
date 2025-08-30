@@ -1299,6 +1299,112 @@ const listingController = {
   },
 
   /**
+   * Get availability for a listing on a specific date
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getAvailability(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { date } = req.query;
+      
+      if (!date) {
+        return next(badRequest('Date parameter is required'));
+      }
+      
+      // Validate date format
+      const targetDate = new Date(date);
+      if (isNaN(targetDate.getTime())) {
+        return next(badRequest('Invalid date format'));
+      }
+      
+      // Check if listing exists
+      const listing = await listingModel.getById(id);
+      if (!listing) {
+        return next(notFound('Listing not found'));
+      }
+      
+      // Get availability mode for this listing
+      const [listingSettings] = await db.query(
+        'SELECT availability_mode FROM listing_settings WHERE listing_id = ?',
+        [id]
+      );
+      
+      const availabilityMode = listingSettings?.availability_mode || 'available-by-default';
+      
+      // Format date for database query (YYYY-MM-DD)
+      const formattedDate = targetDate.toISOString().split('T')[0];
+      
+      // Get availability data for the specific date
+      const availabilityData = await db.query(
+        'SELECT * FROM availability WHERE listing_id = ? AND date = ? AND is_available = TRUE ORDER BY start_time ASC',
+        [id, formattedDate]
+      );
+      
+      // Get existing bookings for the specific date to filter out booked time slots
+      const existingBookings = await db.query(
+        `SELECT start_datetime, end_datetime FROM bookings 
+         WHERE listing_id = ? AND status IN ('pending', 'confirmed') 
+         AND DATE(start_datetime) <= ? AND DATE(end_datetime) >= ?`,
+        [id, formattedDate, formattedDate]
+      );
+      
+      // Helper function to check if a time slot overlaps with any booking
+      const isTimeSlotBooked = (slotStart, slotEnd) => {
+        return existingBookings.some(booking => {
+          const bookingStart = new Date(booking.start_datetime);
+          const bookingEnd = new Date(booking.end_datetime);
+          const slotStartTime = new Date(slotStart);
+          const slotEndTime = new Date(slotEnd);
+          
+          // Check for any overlap between slot and booking
+          return slotStartTime < bookingEnd && slotEndTime > bookingStart;
+        });
+      };
+      
+      // Format the availability data into time slots and filter out booked ones
+      const timeSlots = availabilityData
+        .map(slot => {
+          const startTime = slot.start_time;
+          const endTime = slot.end_time;
+          
+          // Create full datetime strings
+          const startDateTime = `${formattedDate}T${startTime}`;
+          const endDateTime = slot.is_overnight && slot.end_date 
+            ? `${slot.end_date}T${endTime}`
+            : `${formattedDate}T${endTime}`;
+          
+          return {
+            id: slot.id,
+            start_time: startTime,
+            end_time: endTime,
+            start_datetime: startDateTime,
+            end_datetime: endDateTime,
+            is_overnight: slot.is_overnight || false,
+            is_available: slot.is_available
+          };
+        })
+        .filter(slot => {
+          // Filter out time slots that are already booked
+          return !isTimeSlotBooked(slot.start_datetime, slot.end_datetime);
+        });
+      
+      res.status(200).json({
+        status: 'success',
+        data: {
+          date: formattedDate,
+          availability_mode: availabilityMode,
+          time_slots: timeSlots
+        }
+      });
+    } catch (error) {
+      console.error('Error getting availability:', error);
+      next(serverError('Failed to get availability'));
+    }
+  },
+
+  /**
    * Calculate unified pricing for a listing based on duration
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object

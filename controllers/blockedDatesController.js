@@ -17,9 +17,12 @@ const blockedDatesController = {
     try {
       const { listingId } = req.params;
       
+      console.log(`[DEBUG] Getting blocked dates for listing ${listingId}`);
+      
       // Check if listing exists
       const listing = await db.getById('listings', listingId);
       if (!listing) {
+        console.log(`[ERROR] Listing ${listingId} not found`);
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found'
@@ -35,7 +38,22 @@ const blockedDatesController = {
       const availabilityMode = listingSettings.length > 0 ? 
         listingSettings[0].availability_mode : 'available-by-default';
       
+      console.log(`[DEBUG] Listing ${listingId} availability mode: ${availabilityMode}`);
+      
       let blockedDates = [];
+      
+      // Get booked dates for this listing (pending and confirmed bookings)
+      console.log(`[DEBUG] Fetching booked dates for listing ${listingId}`);
+      
+      const bookedDates = await db.query(
+        'SELECT id, listing_id, start_datetime, end_datetime, status, created_at FROM bookings WHERE listing_id = ? AND status IN (?, ?)',
+        [listingId, 'pending', 'confirmed']
+      );
+      
+      console.log(`[DEBUG] Found ${bookedDates.length} booked dates for listing ${listingId}`);
+      if (bookedDates.length > 0) {
+        console.log(`[DEBUG] First booked date:`, bookedDates[0]);
+      }
       
       if (availabilityMode === 'available-by-default') {
         // In available-by-default mode, return explicitly blocked dates
@@ -43,6 +61,17 @@ const blockedDatesController = {
           'SELECT * FROM blocked_dates WHERE listing_id = ? ORDER BY start_datetime ASC',
           [listingId]
         );
+        
+        // CRITICAL FIX: Also fetch availability data from availability table
+        console.log(`[DEBUG] Fetching availability data from availability table for listing ${listingId}`);
+        const availabilityData = await db.query(
+          'SELECT * FROM availability WHERE listing_id = ? ORDER BY date ASC, start_time ASC',
+          [listingId]
+        );
+        console.log(`[DEBUG] Found ${availabilityData.length} availability entries`);
+        if (availabilityData.length > 0) {
+          console.log(`[DEBUG] First availability entry:`, availabilityData[0]);
+        }
         
         // Format blocked dates to match the same format as available dates
         blockedDates = rawBlockedDates.map(blocked => {
@@ -112,19 +141,43 @@ const blockedDatesController = {
             };
           }
         });
-      } else {
-        // In blocked-by-default mode, return available dates from availability table
-        // Get available dates from the availability table
-        const availableDates = await db.query(
-          'SELECT * FROM availability WHERE listing_id = ? AND is_available = TRUE ORDER BY date ASC, start_time ASC',
-          [listingId]
-        );
         
-
+        // Add booked dates as blocked dates
+        const formattedBookedDates = bookedDates.map(booking => {
+          // Format datetime strings consistently
+          const formatDateTime = (datetime) => {
+            if (!datetime) return null;
+            
+            if (datetime instanceof Date) {
+              return datetime.toISOString().slice(0, 19); // YYYY-MM-DDTHH:MM:SS
+            }
+            
+            if (typeof datetime === 'string') {
+              // Remove timezone info and milliseconds
+              return datetime.split('.')[0].replace('Z', '');
+            }
+            
+            return datetime;
+          };
+          
+          return {
+            id: `booking-${booking.id}`,
+            listing_id: booking.listing_id,
+            start_datetime: formatDateTime(booking.start_datetime),
+            end_datetime: formatDateTime(booking.end_datetime),
+            reason: `Booked (${booking.status})`,
+            created_at: booking.created_at,
+            is_available: false,
+            is_booked: true,
+            is_overnight: false,
+            primary_date: null
+          };
+        });
         
-        // Transform available dates to the blocked_dates format for consistency
-        // We're returning available slots as "unblocked" dates
-        blockedDates = availableDates.map(available => {
+        console.log(`[DEBUG] Formatted ${formattedBookedDates.length} booked dates`);
+        
+        // Step 2: Process availability data and add it to the response
+        const formattedAvailabilityData = availabilityData.map(available => {
           try {
             // Use the date directly as YYYY-MM-DD format without timezone conversion
             let dateStr;
@@ -138,53 +191,257 @@ const blockedDatesController = {
                 const month = String(available.date.getMonth() + 1).padStart(2, '0');
                 const day = String(available.date.getDate()).padStart(2, '0');
                 dateStr = `${year}-${month}-${day}`;
-
               } else {
                 dateStr = available.date;
               }
             }
             
-            // Create datetime strings by combining date with times, but keep them simple
-            const startDateTime = `${dateStr}T${available.start_time || '00:00:00'}`;
-            const endDateTime = `${dateStr}T${available.end_time || '23:59:00'}`;
+            // Create datetime strings by combining date with times
+            let startDateTime, endDateTime;
+            if (available.is_overnight && available.end_date) {
+              // Handle overnight availability
+              startDateTime = `${dateStr}T${available.start_time || '00:00:00'}`;
+              
+              // For overnight, end_date should be used
+              let endDateStr;
+              if (available.end_date instanceof Date) {
+                const year = available.end_date.getFullYear();
+                const month = String(available.end_date.getMonth() + 1).padStart(2, '0');
+                const day = String(available.end_date.getDate()).padStart(2, '0');
+                endDateStr = `${year}-${month}-${day}`;
+              } else {
+                endDateStr = available.end_date;
+              }
+              endDateTime = `${endDateStr}T${available.end_time || '23:59:00'}`;
+            } else {
+              // Regular same-day availability
+              startDateTime = `${dateStr}T${available.start_time || '00:00:00'}`;
+              endDateTime = `${dateStr}T${available.end_time || '23:59:00'}`;
+            }
             
             return {
-              id: available.id,
+              id: `availability-${available.id}`, // Prefix with 'availability-' to distinguish
               listing_id: available.listing_id,
               start_datetime: startDateTime,
               end_datetime: endDateTime,
-              reason: 'Available time slot',
+              reason: available.is_available ? 'Available time slot' : 'Unavailable time slot',
               created_at: available.created_at,
-              is_available: true
+              is_available: available.is_available,
+              is_overnight: available.is_overnight || false,
+              primary_date: dateStr
             };
           } catch (err) {
-            console.error('Error creating datetime:', err, 'for record:', available);
+            console.error('Error formatting availability data:', err, 'for record:', available);
             return {
-              id: available.id,
+              id: `availability-${available.id}`,
               listing_id: available.listing_id,
               start_datetime: null,
               end_datetime: null,
               reason: 'Available time slot (error parsing date/time)',
               created_at: available.created_at,
-              is_available: true
+              is_available: available.is_available,
+              is_overnight: available.is_overnight || false,
+              primary_date: null
             };
           }
         });
+        
+        console.log(`[DEBUG] Formatted ${formattedAvailabilityData.length} availability entries`);
+        
+        // Combine regular blocked dates with booked dates and availability data
+        blockedDates = [...blockedDates, ...formattedBookedDates, ...formattedAvailabilityData];
+        
+        console.log(`[DEBUG] Total entries after combining: ${blockedDates.length}`);
+        console.log(`[DEBUG] Breakdown: ${blockedDates.length - formattedBookedDates.length - formattedAvailabilityData.length} manually blocked, ${formattedBookedDates.length} from bookings, ${formattedAvailabilityData.length} from availability`);
+        
+        if (formattedBookedDates.length > 0) {
+          console.log(`[DEBUG] First booked date:`, formattedBookedDates[0]);
+        }
+      } else {
+        // In blocked-by-default mode, only return manually blocked dates and booked dates
+        // Do NOT include available dates as they are not blocked
+        
+        // Add booked dates as blocked in blocked-by-default mode
+        const formattedBookedDates = bookedDates.map(booking => {
+          const formatDateTime = (datetime) => {
+            if (!datetime) return null;
+            if (datetime instanceof Date) {
+              return datetime.toISOString().slice(0, 19);
+            }
+            if (typeof datetime === 'string') {
+              return datetime.split('.')[0].replace('Z', '');
+            }
+            return datetime;
+          };
+          
+          return {
+            id: `booking-${booking.id}`,
+            listing_id: booking.listing_id,
+            start_datetime: formatDateTime(booking.start_datetime),
+            end_datetime: formatDateTime(booking.end_datetime),
+            reason: `Booked (${booking.status})`,
+            created_at: booking.created_at,
+            is_available: false,
+            is_booked: true
+          };
+        });
+        
+        // Only include manually blocked dates and booked dates
+        blockedDates = [...blockedDates, ...formattedBookedDates];
+        console.log(`[DEBUG] Blocked-by-default mode: ${blockedDates.length - formattedBookedDates.length} manually blocked, ${formattedBookedDates.length} booked dates`);
       }
       
-      res.status(200).json({
+      // CRITICAL FIX: Log the response we're about to send
+      console.log(`[DEBUG] Sending response with ${blockedDates.length} blocked dates`);
+      
+      // Make sure bookedInFinal is defined for the blocked-by-default mode as well
+      const bookedInFinal = blockedDates.filter(date => 
+        (date.is_booked === true) || 
+        (date.reason && date.reason.includes('Booked')) || 
+        (date.id && typeof date.id === 'string' && date.id.includes('booking-'))
+      );
+      
+      console.log(`[DEBUG] Blocked dates breakdown: ${blockedDates.length - bookedInFinal.length} manually blocked, ${bookedInFinal.length} from bookings`);
+      
+      // Ensure we have the correct structure
+      const responseData = {
         status: 'success',
         results: blockedDates.length,
         data: blockedDates,
         availability_mode: availabilityMode // Include mode in response
-      });
+      };
+      
+      // Log the first few items to verify structure
+      if (blockedDates.length > 0) {
+        console.log(`[DEBUG] First blocked date in response:`, blockedDates[0]);
+      }
+      
+      if (bookedInFinal.length > 0) {
+        console.log(`[DEBUG] First booked date in response:`, bookedInFinal[0]);
+      }
+      
+      res.status(200).json(responseData);
     } catch (error) {
       next(error);
     }
   },
-  
+
   /**
-   * Add blocked date to a listing
+   * Get availability data for guest reservation screens
+   * Returns available dates/times and booked dates in a format suitable for calendar display
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getGuestAvailability(req, res, next) {
+    try {
+      const { id } = req.params;
+      const listingId = parseInt(id);
+      
+      console.log(`[DEBUG] Getting guest availability for listing ${listingId}`);
+      
+      // Check if listing exists
+      const listing = await db.getById('listings', listingId);
+      if (!listing) {
+        console.log(`[ERROR] Listing ${listingId} not found`);
+        return res.status(404).json({
+          status: 'error',
+          message: 'Listing not found'
+        });
+      }
+      
+      // Get listing settings to check availability mode
+      const listingSettings = await db.query(
+        'SELECT * FROM listing_settings WHERE listing_id = ?',
+        [listingId]
+      );
+      
+      const availabilityMode = listingSettings.length > 0 ? 
+        listingSettings[0].availability_mode : 'available-by-default';
+      
+      console.log(`[DEBUG] Listing ${listingId} availability mode: ${availabilityMode}`);
+      
+      // Get booked dates (confirmed and pending bookings)
+      const bookedDates = await db.query(
+        'SELECT id, listing_id, start_datetime, end_datetime, status, created_at FROM bookings WHERE listing_id = ? AND status IN (?, ?)',
+        [listingId, 'pending', 'confirmed']
+      );
+      
+      console.log(`[DEBUG] Found ${bookedDates.length} booked dates for listing ${listingId}`);
+      
+      // Get blocked dates
+      const blockedDates = await db.query(
+        'SELECT * FROM blocked_dates WHERE listing_id = ? ORDER BY start_datetime ASC',
+        [listingId]
+      );
+      
+      // Get availability data
+      const availabilityData = await db.query(
+        'SELECT * FROM availability WHERE listing_id = ? ORDER BY date ASC, start_time ASC',
+        [listingId]
+      );
+      
+      console.log(`[DEBUG] Found ${availabilityData.length} availability entries`);
+      
+      // Format response data for guest calendar
+      const response = {
+        availability_mode: availabilityMode,
+        booked_dates: bookedDates.map(booking => ({
+          id: `booking-${booking.id}`,
+          start_datetime: booking.start_datetime,
+          end_datetime: booking.end_datetime,
+          reason: `Booked (${booking.status})`,
+          is_available: false,
+          is_booked: true,
+          type: 'booking'
+        })),
+        blocked_dates: blockedDates.map(blocked => ({
+          id: blocked.id,
+          start_datetime: blocked.start_datetime,
+          end_datetime: blocked.end_datetime,
+          reason: blocked.reason || 'Blocked',
+          is_available: false,
+          is_booked: false,
+          type: 'blocked'
+        })),
+        available_dates: availabilityData.map(available => {
+          // Create datetime strings by combining date with times
+          let startDateTime, endDateTime;
+          
+          if (available.date && available.start_time) {
+            const dateStr = available.date.toString().split('T')[0]; // Get YYYY-MM-DD
+            startDateTime = `${dateStr}T${available.start_time}`;
+            endDateTime = available.end_time ? `${dateStr}T${available.end_time}` : startDateTime;
+          }
+          
+          return {
+            id: available.id,
+            start_datetime: startDateTime,
+            end_datetime: endDateTime,
+            date: available.date,
+            start_time: available.start_time,
+            end_time: available.end_time,
+            is_available: true,
+            is_booked: false,
+            is_overnight: available.is_overnight || false,
+            type: 'available'
+          };
+        })
+      };
+      
+      res.status(200).json({
+        status: 'success',
+        data: response
+      });
+      
+    } catch (error) {
+      console.error('Error getting guest availability:', error);
+      next(error);
+    }
+  },
+
+  /**
+   * Add a new blocked date
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
    * @param {Function} next - Express next middleware function
@@ -395,4 +652,4 @@ const blockedDatesController = {
   }
 };
 
-module.exports = blockedDatesController; 
+module.exports = blockedDatesController;

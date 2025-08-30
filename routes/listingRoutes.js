@@ -182,6 +182,44 @@ router.post(
 );
 
 /**
+ * @route   GET /api/listings/:id/availability
+ * @desc    Get availability for a listing on a specific date
+ * @access  Public
+ * @query   date (required) - Date in YYYY-MM-DD format
+ */
+router.get(
+  '/:id/availability',
+  idParamValidation,
+  validate,
+  listingController.getAvailability
+);
+
+/**
+ * @route   GET /api/listings/:id/guest-availability
+ * @desc    Get comprehensive availability data for guest reservation screens
+ *          Returns available dates/times, booked dates, and blocked dates
+ * @access  Public
+ */
+router.get(
+  '/:id/guest-availability',
+  idParamValidation,
+  validate,
+  require('../controllers/blockedDatesController').getGuestAvailability
+);
+
+/**
+ * @route   GET /api/listings/:id/bookings
+ * @desc    Get booking data for a specific listing (for availability checking)
+ * @access  Public
+ */
+router.get(
+  '/:id/bookings',
+  idParamValidation,
+  validate,
+  require('../controllers/bookingController').getListingBookings
+);
+
+/**
  * @route   POST /api/listings/:id/availability
  * @desc    Add availability to a listing
  * @access  Private/Owner

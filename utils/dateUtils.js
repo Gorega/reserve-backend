@@ -58,10 +58,18 @@ const extractTimeFromDateTime = (dateTimeStr) => {
   if (!dateTimeStr) return null;
   
   try {
-    const date = new Date(dateTimeStr);
-    if (isNaN(date.getTime())) return null;
+    // Handle both ISO format and MySQL datetime format
+    if (dateTimeStr.includes('T')) {
+      // ISO format: extract time part directly without timezone conversion
+      return dateTimeStr.split('T')[1].substring(0, 8);
+    } else if (dateTimeStr.includes(' ')) {
+      // MySQL datetime format: extract time part directly
+      const timePart = dateTimeStr.split(' ')[1];
+      // Ensure we have HH:MM:SS format
+      return timePart.length === 5 ? `${timePart}:00` : timePart.substring(0, 8);
+    }
     
-    return date.toISOString().split('T')[1].substring(0, 8);
+    return null;
   } catch (error) {
     return null;
   }
@@ -76,10 +84,16 @@ const extractDateFromDateTime = (dateTimeStr) => {
   if (!dateTimeStr) return null;
   
   try {
-    const date = new Date(dateTimeStr);
-    if (isNaN(date.getTime())) return null;
+    // Handle both ISO format and MySQL datetime format
+    if (dateTimeStr.includes('T')) {
+      // ISO format: extract date part directly without timezone conversion
+      return dateTimeStr.split('T')[0];
+    } else if (dateTimeStr.includes(' ')) {
+      // MySQL datetime format: extract date part directly
+      return dateTimeStr.split(' ')[0];
+    }
     
-    return date.toISOString().split('T')[0];
+    return null;
   } catch (error) {
     return null;
   }

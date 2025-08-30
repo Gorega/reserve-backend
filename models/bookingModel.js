@@ -3,6 +3,7 @@ const { notFound, badRequest } = require('../utils/errorHandler');
 const listingModel = require('./listingModel');
 const smartPricingUtils = require('../utils/smartPricingUtils');
 const specialPricingModel = require('./specialPricingModel');
+const pricingOptionModel = require('./pricingOptionModel');
 
 /**
  * Booking Model
@@ -213,6 +214,96 @@ const bookingModel = {
   },
   
   /**
+   * Automatically determine booking times based on availability and unit type
+   * @param {number} listing_id - Listing ID
+   * @param {string} selected_date - Selected date (YYYY-MM-DD)
+   * @param {string} booking_period - 'morning', 'night', or 'day' for day/night listings
+   * @returns {Promise<Object>} - Start and end datetime
+   */
+  async determineBookingTimes(listing_id, selected_date, booking_period = null) {
+    try {
+      // Get listing details to determine unit type
+      const listingQuery = `
+        SELECT l.unit_type
+        FROM listings l
+        WHERE l.id = ? AND l.active = 1
+      `;
+      
+      const listings = await db.query(listingQuery, [listing_id]);
+      
+      if (listings.length === 0) {
+        throw notFound('Listing not found or inactive');
+      }
+      
+      const listing = listings[0];
+      
+      // For hour unit type, return null to use existing time selection logic
+      if (listing.unit_type === 'hour') {
+        return null;
+      }
+      
+      // For day/night unit types, get availability for the selected date
+      const availabilityQuery = `
+        SELECT 
+          CASE 
+            WHEN start_datetime IS NOT NULL THEN start_datetime
+            ELSE CONCAT(date, ' ', start_time)
+          END as unified_start_datetime,
+          CASE 
+            WHEN end_datetime IS NOT NULL THEN end_datetime
+            ELSE CONCAT(COALESCE(end_date, date), ' ', end_time)
+          END as unified_end_datetime,
+          is_overnight
+        FROM availability 
+        WHERE listing_id = ? 
+          AND is_available = 1
+          AND (
+            date = ? OR 
+            (is_overnight = 1 AND date = ?)
+          )
+        ORDER BY unified_start_datetime ASC
+      `;
+      
+      const availability = await db.query(availabilityQuery, [listing_id, selected_date, selected_date]);
+      
+      if (availability.length === 0) {
+        throw badRequest('No availability found for the selected date');
+      }
+      
+      // Determine which availability slot to use based on booking_period
+      let selectedSlot = null;
+      
+      if (booking_period === 'morning' || booking_period === 'day') {
+        // Find morning/day slot (typically starts in AM hours)
+        selectedSlot = availability.find(slot => {
+          const startTime = new Date(slot.unified_start_datetime);
+          return startTime.getHours() >= 6 && startTime.getHours() < 18; // 6 AM to 6 PM
+        });
+      } else if (booking_period === 'night') {
+        // Find night slot (typically starts in PM hours or overnight)
+        selectedSlot = availability.find(slot => {
+          const startTime = new Date(slot.unified_start_datetime);
+          return startTime.getHours() >= 18 || startTime.getHours() < 6 || slot.is_overnight; // 6 PM onwards or overnight
+        });
+      }
+      
+      // If no specific period slot found, use the first available slot
+      if (!selectedSlot) {
+        selectedSlot = availability[0];
+      }
+      
+      return {
+        start_datetime: selectedSlot.unified_start_datetime,
+        end_datetime: selectedSlot.unified_end_datetime
+      };
+      
+    } catch (error) {
+      console.error('Error determining booking times:', error);
+      throw error;
+    }
+  },
+
+  /**
    * Create a new booking
    * @param {Object} bookingData - Booking data
    * @returns {Promise<Object>} - Created booking
@@ -227,12 +318,26 @@ const bookingModel = {
         end_datetime,
         booking_type,
         guests_count,
-        notes
+        notes,
+        selected_date,
+        booking_period
       } = bookingData;
       
+      let finalStartDatetime = start_datetime;
+      let finalEndDatetime = end_datetime;
+      
+      // For day/night bookings, automatically determine times if not provided
+      if ((booking_type === 'daily' || booking_type === 'night') && selected_date && !start_datetime) {
+        const autoTimes = await this.determineBookingTimes(listing_id, selected_date, booking_period);
+        if (autoTimes) {
+          finalStartDatetime = autoTimes.start_datetime;
+          finalEndDatetime = autoTimes.end_datetime;
+        }
+      }
+      
       // Format dates for MySQL
-      const formattedStartDatetime = this.formatDateForMySQL(start_datetime);
-      const formattedEndDatetime = this.formatDateForMySQL(end_datetime);
+      const formattedStartDatetime = this.formatDateForMySQL(finalStartDatetime);
+      const formattedEndDatetime = this.formatDateForMySQL(finalEndDatetime);
       
       // Check if the listing exists and is active
       const listingQuery = `
@@ -254,6 +359,9 @@ const bookingModel = {
       }
       
       const listing = listings[0];
+      
+      // Fetch pricing options for this listing
+      listing.pricing_options = await pricingOptionModel.getByListingId(listing_id);
       
       // Check if the listing is available for the requested time
       const isAvailable = await listingModel.checkAvailability(
@@ -883,7 +991,264 @@ const bookingModel = {
       throw badRequest('Invalid date format');
     }
     
-    return d.toISOString().slice(0, 19).replace('T', ' ');
+    // Format without timezone conversion to preserve original time
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  },
+
+  /**
+   * Get available time slots for a specific date and listing using smart availability logic
+   * @param {number} listing_id - Listing ID
+   * @param {string} date - Date in YYYY-MM-DD format
+   * @returns {Promise<Array>} - Available time slots with smart splitting around bookings
+   */
+  async getAvailableTimeSlots(listing_id, date) {
+    try {
+      // Get listing details
+      const listingQuery = `
+        SELECT unit_type
+        FROM listings
+        WHERE id = ? AND active = 1
+      `;
+      
+      const listings = await db.query(listingQuery, [listing_id]);
+      
+      if (listings.length === 0) {
+        throw notFound('Listing not found or inactive');
+      }
+      
+      const listing = listings[0];
+      
+      // Only applicable for hourly bookings
+      if (listing.unit_type !== 'hour') {
+        return [];
+      }
+      
+      // Get availability for the date
+      const availabilityQuery = `
+        SELECT 
+          CASE 
+            WHEN start_datetime IS NOT NULL THEN start_datetime
+            ELSE CONCAT(date, ' ', start_time)
+          END as start_time,
+          CASE 
+            WHEN end_datetime IS NOT NULL THEN end_datetime
+            ELSE CONCAT(COALESCE(end_date, date), ' ', end_time)
+          END as end_time
+        FROM availability 
+        WHERE listing_id = ? 
+          AND is_available = 1
+          AND date = ?
+        ORDER BY start_time ASC
+      `;
+      
+      const availability = await db.query(availabilityQuery, [listing_id, date]);
+      
+      if (availability.length === 0) {
+        return [];
+      }
+      
+      // Get existing bookings that overlap with this date
+      const bookingsQuery = `
+        SELECT start_datetime, end_datetime
+        FROM bookings
+        WHERE listing_id = ?
+          AND status IN ('confirmed', 'pending')
+          AND DATE(start_datetime) <= ?
+          AND DATE(end_datetime) >= ?
+        ORDER BY start_datetime ASC
+      `;
+      
+      const existingBookings = await db.query(bookingsQuery, [listing_id, date, date]);
+      
+      // CRITICAL FIX: Also get blocked dates that overlap with this date
+      const blockedDatesQuery = `
+        SELECT start_datetime, end_datetime
+        FROM blocked_dates
+        WHERE listing_id = ?
+          AND DATE(start_datetime) <= ?
+          AND DATE(end_datetime) >= ?
+        ORDER BY start_datetime ASC
+      `;
+      
+      const blockedDates = await db.query(blockedDatesQuery, [listing_id, date, date]);
+      
+      // Combine bookings and blocked dates for unified processing
+      const allBlockedPeriods = [...existingBookings, ...blockedDates];
+      
+      // Smart availability logic: split availability periods around bookings
+      const timeSlots = [];
+      
+      for (const slot of availability) {
+        const slotStart = new Date(slot.start_time);
+        const slotEnd = new Date(slot.end_time);
+        
+        // Find blocked periods (bookings + blocked dates) that overlap with this availability slot
+        const overlappingBlocks = allBlockedPeriods.filter(block => {
+          const blockStart = new Date(block.start_datetime);
+          const blockEnd = new Date(block.end_datetime);
+          
+          // Check if blocked period overlaps with availability slot
+          return blockStart < slotEnd && blockEnd > slotStart;
+        });
+        
+        if (overlappingBlocks.length === 0) {
+          // No conflicts, add the entire availability slot
+          timeSlots.push({
+            start_time: slotStart.toISOString(),
+            end_time: slotEnd.toISOString(),
+            display_time: `${slotStart.getHours().toString().padStart(2, '0')}:${slotStart.getMinutes().toString().padStart(2, '0')} - ${slotEnd.getHours().toString().padStart(2, '0')}:${slotEnd.getMinutes().toString().padStart(2, '0')}`,
+            duration_minutes: Math.round((slotEnd - slotStart) / (1000 * 60))
+          });
+        } else {
+          // Smart splitting: create available time ranges around blocked periods (bookings + blocked dates)
+          const sortedBlocks = overlappingBlocks.sort((a, b) => new Date(a.start_datetime) - new Date(b.start_datetime));
+          
+          let currentStart = slotStart;
+          
+          for (const block of sortedBlocks) {
+            const blockStart = new Date(block.start_datetime);
+            const blockEnd = new Date(block.end_datetime);
+            
+            // If there's a gap before this blocked period, create an available slot
+            if (currentStart < blockStart) {
+              const availableEnd = new Date(Math.min(blockStart.getTime(), slotEnd.getTime()));
+              
+              if (currentStart < availableEnd) {
+                const durationMinutes = Math.round((availableEnd - currentStart) / (1000 * 60));
+                
+                // Only add slots that are at least 30 minutes long
+                if (durationMinutes >= 30) {
+                  timeSlots.push({
+                    start_time: currentStart.toISOString(),
+                    end_time: availableEnd.toISOString(),
+                    display_time: `${currentStart.getHours().toString().padStart(2, '0')}:${currentStart.getMinutes().toString().padStart(2, '0')} - ${availableEnd.getHours().toString().padStart(2, '0')}:${availableEnd.getMinutes().toString().padStart(2, '0')}`,
+                    duration_minutes: durationMinutes,
+                    is_partial: true
+                  });
+                }
+              }
+            }
+            
+            // Move current start to after this blocked period
+            currentStart = new Date(Math.max(blockEnd.getTime(), currentStart.getTime()));
+          }
+          
+          // If there's time remaining after all blocked periods, create a final available slot
+          if (currentStart < slotEnd) {
+            const durationMinutes = Math.round((slotEnd - currentStart) / (1000 * 60));
+            
+            // Only add slots that are at least 30 minutes long
+            if (durationMinutes >= 30) {
+              timeSlots.push({
+                start_time: currentStart.toISOString(),
+                end_time: slotEnd.toISOString(),
+                display_time: `${currentStart.getHours().toString().padStart(2, '0')}:${currentStart.getMinutes().toString().padStart(2, '0')} - ${slotEnd.getHours().toString().padStart(2, '0')}:${slotEnd.getMinutes().toString().padStart(2, '0')}`,
+                duration_minutes: durationMinutes,
+                is_partial: true
+              });
+            }
+          }
+        }
+      }
+      
+      return timeSlots;
+      
+    } catch (error) {
+      console.error('Error getting available time slots:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Check for booking conflicts with existing bookings
+   * @param {number} listing_id - Listing ID
+   * @param {string} start_datetime - Start datetime
+   * @param {string} end_datetime - End datetime
+   * @param {number} exclude_booking_id - Booking ID to exclude from conflict check
+   * @returns {Promise<Array>} - Conflicting bookings
+   */
+  async checkBookingConflicts(listing_id, start_datetime, end_datetime, exclude_booking_id = null) {
+    try {
+      let query = `
+        SELECT b.*, u.name as user_name
+        FROM bookings b
+        JOIN users u ON b.user_id = u.id
+        WHERE b.listing_id = ?
+          AND b.status IN ('confirmed', 'pending')
+          AND (
+            (b.start_datetime < ? AND b.end_datetime > ?) OR
+            (b.start_datetime < ? AND b.end_datetime > ?) OR
+            (b.start_datetime >= ? AND b.end_datetime <= ?)
+          )
+      `;
+      
+      const params = [
+        listing_id,
+        end_datetime, start_datetime,
+        start_datetime, start_datetime,
+        start_datetime, end_datetime
+      ];
+      
+      if (exclude_booking_id) {
+        query += ' AND b.id != ?';
+        params.push(exclude_booking_id);
+      }
+      
+      const conflicts = await db.query(query, params);
+      
+      return conflicts;
+      
+    } catch (error) {
+      console.error('Error checking booking conflicts:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get booking statistics for a listing
+   * @param {number} listing_id - Listing ID
+   * @param {string} start_date - Start date for statistics
+   * @param {string} end_date - End date for statistics
+   * @returns {Promise<Object>} - Booking statistics
+   */
+  async getBookingStats(listing_id, start_date, end_date) {
+    try {
+      const statsQuery = `
+        SELECT 
+          COUNT(*) as total_bookings,
+          COUNT(CASE WHEN status = 'confirmed' THEN 1 END) as confirmed_bookings,
+          COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_bookings,
+          COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_bookings,
+          SUM(CASE WHEN status = 'confirmed' THEN total_price ELSE 0 END) as total_revenue,
+          AVG(CASE WHEN status = 'confirmed' THEN total_price ELSE NULL END) as avg_booking_value
+        FROM bookings
+        WHERE listing_id = ?
+          AND DATE(start_datetime) >= ?
+          AND DATE(end_datetime) <= ?
+      `;
+      
+      const stats = await db.query(statsQuery, [listing_id, start_date, end_date]);
+      
+      return stats[0] || {
+        total_bookings: 0,
+        confirmed_bookings: 0,
+        pending_bookings: 0,
+        cancelled_bookings: 0,
+        total_revenue: 0,
+        avg_booking_value: 0
+      };
+      
+    } catch (error) {
+      console.error('Error getting booking statistics:', error);
+      throw error;
+    }
   }
 };
 

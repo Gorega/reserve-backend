@@ -4,6 +4,151 @@ const { toUTCDateString, createUTCDateTime, extractTimeFromDateTime, extractDate
 const { getFileUrl, deleteFile, uploadToCloudinary } = require('../utils/fileUpload');
 
 /**
+ * Helper function to check for reservation conflicts using unified datetime approach
+ * @param {string} listingId - The listing ID
+ * @param {string} startDateTime - Start datetime in ISO format or MySQL datetime format
+ * @param {string} endDateTime - End datetime in ISO format or MySQL datetime format
+ * @returns {Array} Array of conflicting bookings
+ */
+const checkReservationConflicts = async (listingId, startDateTime, endDateTime) => {
+  try {
+    // Normalize datetime formats to MySQL format for consistent comparison
+    const normalizedStartDateTime = new Date(startDateTime).toISOString().slice(0, 19).replace('T', ' ');
+    const normalizedEndDateTime = new Date(endDateTime).toISOString().slice(0, 19).replace('T', ' ');
+    
+    // Check for existing confirmed bookings that overlap with this availability slot
+    // Two time ranges overlap if: start1 < end2 AND start2 < end1
+    const conflictingBookings = await db.query(`
+      SELECT id, start_datetime, end_datetime, status
+      FROM bookings 
+      WHERE listing_id = ? 
+      AND status IN ('confirmed', 'pending')
+      AND start_datetime < ? 
+      AND end_datetime > ?
+    `, [
+      listingId,
+      normalizedEndDateTime,   // Booking starts before availability ends
+      normalizedStartDateTime  // Booking ends after availability starts
+    ]);
+    
+    // Add debug logging to help troubleshoot
+    if (conflictingBookings.length > 0) {
+      console.log('Conflict detected:', {
+        availabilitySlot: { start: normalizedStartDateTime, end: normalizedEndDateTime },
+        conflictingBookings: conflictingBookings.map(b => ({
+          id: b.id,
+          start: b.start_datetime,
+          end: b.end_datetime,
+          status: b.status
+        }))
+      });
+    }
+    
+    return conflictingBookings;
+  } catch (error) {
+    console.error('Error checking reservation conflicts:', error);
+    return [];
+  }
+};
+
+/**
+ * Legacy helper function for backward compatibility
+ * @deprecated Use checkReservationConflicts with datetime parameters instead
+ */
+const checkReservationConflictsLegacy = async (listingId, checkDate, checkStartTime, checkEndTime, checkEndDate = null, is_overnight = false) => {
+  let startDateTime, endDateTime;
+  
+  try {
+    if (checkEndDate && is_overnight) {
+      startDateTime = createUTCDateTime(checkDate, checkStartTime);
+      endDateTime = createUTCDateTime(checkEndDate, checkEndTime);
+    } else {
+      startDateTime = createUTCDateTime(checkDate, checkStartTime);
+      endDateTime = createUTCDateTime(checkDate, checkEndTime);
+    }
+    
+    return await checkReservationConflicts(listingId, startDateTime, endDateTime);
+  } catch (error) {
+    console.error('Error in legacy conflict check:', error);
+    return [];
+  }
+};
+
+/**
+ * Get partial availability by splitting time slots around bookings
+ * @param {number} listingId - Listing ID
+ * @param {string} startDateTime - Start datetime of availability slot
+ * @param {string} endDateTime - End datetime of availability slot
+ * @param {Object} originalSlot - Original availability slot object
+ * @returns {Promise<Array>} - Array of available time slots
+ */
+const getPartialAvailability = async (listingId, startDateTime, endDateTime, originalSlot) => {
+  try {
+    // Get all bookings that overlap with this time slot
+    const conflicts = await checkReservationConflicts(listingId, startDateTime, endDateTime);
+    
+    if (conflicts.length === 0) {
+      // No conflicts, return the original slot
+      return [originalSlot];
+    }
+    
+    // Convert datetime strings to Date objects for easier manipulation
+    const slotStart = new Date(startDateTime);
+    const slotEnd = new Date(endDateTime);
+    
+    // Sort conflicts by start time
+    const sortedConflicts = conflicts.sort((a, b) => new Date(a.start_datetime) - new Date(b.start_datetime));
+    
+    const availableSlots = [];
+    let currentStart = slotStart;
+    
+    for (const conflict of sortedConflicts) {
+      const conflictStart = new Date(conflict.start_datetime);
+      const conflictEnd = new Date(conflict.end_datetime);
+      
+      // If there's a gap before this conflict, create an available slot
+      if (currentStart < conflictStart) {
+        const availableEnd = new Date(Math.min(conflictStart.getTime(), slotEnd.getTime()));
+        
+        if (currentStart < availableEnd) {
+          availableSlots.push({
+            ...originalSlot,
+            id: `${originalSlot.id}_partial_${availableSlots.length + 1}`,
+            start_datetime: currentStart.toISOString().slice(0, 19).replace('T', ' '),
+            end_datetime: availableEnd.toISOString().slice(0, 19).replace('T', ' '),
+            start_time: extractTimeFromDateTime(currentStart.toISOString()),
+            end_time: extractTimeFromDateTime(availableEnd.toISOString()),
+            is_partial: true
+          });
+        }
+      }
+      
+      // Move current start to after this conflict
+      currentStart = new Date(Math.max(conflictEnd.getTime(), currentStart.getTime()));
+    }
+    
+    // If there's time remaining after all conflicts, create a final available slot
+    if (currentStart < slotEnd) {
+      availableSlots.push({
+        ...originalSlot,
+        id: `${originalSlot.id}_partial_${availableSlots.length + 1}`,
+        start_datetime: currentStart.toISOString().slice(0, 19).replace('T', ' '),
+        end_datetime: slotEnd.toISOString().slice(0, 19).replace('T', ' '),
+        start_time: extractTimeFromDateTime(currentStart.toISOString()),
+        end_time: extractTimeFromDateTime(slotEnd.toISOString()),
+        is_partial: true
+      });
+    }
+    
+    return availableSlots;
+  } catch (error) {
+    console.error('Error getting partial availability:', error);
+    // Return original slot if there's an error
+    return [originalSlot];
+  }
+};
+
+/**
  * Host Controller
  * Handles HTTP requests for host operations
  */
@@ -842,20 +987,57 @@ const hostController = {
       `, [listingId]);
       
       // Format data for frontend
-      const formattedReservations = reservations.map(booking => ({
-        id: booking.id,
-        type: 'reservation',
-        startDate: booking.check_in_date,
-        endDate: booking.check_out_date,
-        status: booking.status,
-        guests: booking.guests,
-        totalPrice: booking.total_price,
-        guest: {
-          id: booking.guest_id,
-          name: booking.guest_name,
-          profile_image: booking.guest_profile_image
+      const formattedReservations = reservations.map(booking => {
+        // Format datetime fields without timezone conversion to preserve original time
+        let startDate, endDate;
+        
+        if (booking.check_in_date instanceof Date) {
+          // Format Date object as YYYY-MM-DDTHH:MM:SS.sssZ without timezone conversion
+          const year = booking.check_in_date.getFullYear();
+          const month = String(booking.check_in_date.getMonth() + 1).padStart(2, '0');
+          const day = String(booking.check_in_date.getDate()).padStart(2, '0');
+          const hours = String(booking.check_in_date.getHours()).padStart(2, '0');
+          const minutes = String(booking.check_in_date.getMinutes()).padStart(2, '0');
+          const seconds = String(booking.check_in_date.getSeconds()).padStart(2, '0');
+          const milliseconds = String(booking.check_in_date.getMilliseconds()).padStart(3, '0');
+          startDate = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}Z`;
+        } else {
+          // For string datetime, ensure it ends with Z if not already present
+          startDate = typeof booking.check_in_date === 'string' && !booking.check_in_date.endsWith('Z') ? 
+            booking.check_in_date + 'Z' : booking.check_in_date;
         }
-      }));
+        
+        if (booking.check_out_date instanceof Date) {
+          // Format Date object as YYYY-MM-DDTHH:MM:SS.sssZ without timezone conversion
+          const year = booking.check_out_date.getFullYear();
+          const month = String(booking.check_out_date.getMonth() + 1).padStart(2, '0');
+          const day = String(booking.check_out_date.getDate()).padStart(2, '0');
+          const hours = String(booking.check_out_date.getHours()).padStart(2, '0');
+          const minutes = String(booking.check_out_date.getMinutes()).padStart(2, '0');
+          const seconds = String(booking.check_out_date.getSeconds()).padStart(2, '0');
+          const milliseconds = String(booking.check_out_date.getMilliseconds()).padStart(3, '0');
+          endDate = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}Z`;
+        } else {
+          // For string datetime, ensure it ends with Z if not already present
+          endDate = typeof booking.check_out_date === 'string' && !booking.check_out_date.endsWith('Z') ? 
+            booking.check_out_date + 'Z' : booking.check_out_date;
+        }
+        
+        return {
+          id: booking.id,
+          type: 'reservation',
+          startDate: startDate,
+          endDate: endDate,
+          status: booking.status,
+          guests: booking.guests,
+          totalPrice: booking.total_price,
+          guest: {
+            id: booking.guest_id,
+            name: booking.guest_name,
+            profile_image: booking.guest_profile_image
+          }
+        };
+      });
       
       res.status(200).json({
         status: 'success',
@@ -1578,11 +1760,26 @@ const hostController = {
           });
         }
         
-        // Get availability settings
-        const availabilityResults = await db.query(
-          'SELECT * FROM availability WHERE listing_id = ? ORDER BY date ASC, start_time ASC',
-          [listingId]
-        );
+        // Get availability settings with unified datetime approach
+        const availabilityResults = await db.query(`
+          SELECT *, 
+                 CASE 
+                   WHEN start_datetime IS NOT NULL THEN start_datetime
+                   ELSE CONCAT(date, ' ', start_time)
+                 END as unified_start_datetime,
+                 CASE 
+                   WHEN end_datetime IS NOT NULL THEN end_datetime
+                   WHEN is_overnight = 1 AND end_date IS NOT NULL THEN CONCAT(end_date, ' ', end_time)
+                   ELSE CONCAT(date, ' ', end_time)
+                 END as unified_end_datetime
+          FROM availability 
+          WHERE listing_id = ? 
+          ORDER BY 
+            CASE 
+              WHEN start_datetime IS NOT NULL THEN start_datetime
+              ELSE CONCAT(date, ' ', start_time)
+            END ASC
+        `, [listingId]);
         
         // Get availability mode (default is "available-by-default")
         const [availabilityMode] = await db.query(
@@ -1592,23 +1789,55 @@ const hostController = {
         
         const mode = availabilityMode?.availability_mode || 'available-by-default';
         
-        // Format dates to YYYY-MM-DD format without timezone
-        const availability = availabilityResults.map(item => {
-          // Extract just the date part in YYYY-MM-DD format
-          const dateObj = new Date(item.date);
-          const formattedDate = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
-          
-          return {
-            ...item,
-            date: formattedDate
+        // Format availability with unified datetime structure and filter conflicts
+        const filteredAvailability = [];
+        
+        for (const item of availabilityResults) {
+          // Create unified availability object with consistent datetime format
+          const unifiedItem = {
+            id: item.id,
+            listing_id: item.listing_id,
+            start_datetime: item.unified_start_datetime,
+            end_datetime: item.unified_end_datetime,
+            is_available: item.is_available,
+            is_overnight: item.is_overnight,
+            is_recurring: item.is_recurring,
+            reason: item.reason,
+            recurrence_pattern: item.recurrence_pattern,
+            slot_duration: item.slot_duration,
+            booking_type: item.booking_type,
+            created_at: item.created_at,
+            updated_at: item.updated_at,
+            // Keep legacy fields for backward compatibility - extract from unified datetime
+            date: item.unified_start_datetime ? extractDateFromDateTime(item.unified_start_datetime) : (item.date ? toUTCDateString(item.date) : null),
+            start_time: item.unified_start_datetime ? extractTimeFromDateTime(item.unified_start_datetime) : item.start_time,
+            end_time: item.unified_end_datetime ? extractTimeFromDateTime(item.unified_end_datetime) : item.end_time,
+            end_date: item.is_overnight && item.unified_end_datetime ? extractDateFromDateTime(item.unified_end_datetime) : (item.end_date ? toUTCDateString(item.end_date) : null)
           };
-        });
+          
+          // Only filter if this is marked as available
+          if (item.is_available) {
+            // Get partial availability by splitting around bookings
+            const partialSlots = await getPartialAvailability(
+              listingId,
+              item.unified_start_datetime,
+              item.unified_end_datetime,
+              unifiedItem
+            );
+            
+            // Add all partial slots to filtered availability
+            filteredAvailability.push(...partialSlots);
+          } else {
+            // Include unavailable slots as-is
+            filteredAvailability.push(unifiedItem);
+          }
+        }
         
         res.status(200).json({
           status: 'success',
           data: {
             mode,
-            availability
+            availability: filteredAvailability
           }
         });
       } catch (error) {
@@ -1626,7 +1855,12 @@ const hostController = {
     async addAvailability(req, res, next) {
       try {
         const { listingId } = req.params;
-        const { date, start_time, end_time, end_date, is_available, is_overnight, reason, recurring } = req.body;
+        const { 
+          // Support both legacy and unified datetime formats
+          date, start_time, end_time, end_date, 
+          start_datetime, end_datetime,
+          is_available, is_overnight, reason, recurring 
+        } = req.body;
         
         // Check if listing exists and belongs to user
         const [listing] = await db.query(
@@ -1638,6 +1872,31 @@ const hostController = {
           return res.status(404).json({
             status: 'error',
             message: 'Listing not found or not owned by you'
+          });
+        }
+        
+        // Determine datetime values - prioritize unified format
+        let finalStartDateTime, finalEndDateTime;
+        
+        if (start_datetime && end_datetime) {
+          // Use unified datetime format
+          finalStartDateTime = new Date(start_datetime).toISOString().slice(0, 19).replace('T', ' ');
+          finalEndDateTime = new Date(end_datetime).toISOString().slice(0, 19).replace('T', ' ');
+        } else if (date && start_time && end_time) {
+          // Convert legacy format to unified datetime
+          const normalizedDate = toUTCDateString(date);
+          if (is_overnight && end_date) {
+            const normalizedEndDate = toUTCDateString(end_date);
+            finalStartDateTime = `${normalizedDate} ${start_time}`;
+            finalEndDateTime = `${normalizedEndDate} ${end_time}`;
+          } else {
+            finalStartDateTime = `${normalizedDate} ${start_time}`;
+            finalEndDateTime = `${normalizedDate} ${end_time}`;
+          }
+        } else {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Either start_datetime/end_datetime or date/start_time/end_time must be provided'
           });
         }
 
@@ -1689,42 +1948,47 @@ const hostController = {
         }
         
         // For blocked-by-default mode, continue with normal availability table logic
-        // Validate and normalize date without timezone conversion
+        // Validate and normalize date using dateUtils
         let normalizedDate;
         try {
-          // Handle the date string directly to avoid timezone issues
-          if (!date || typeof date !== 'string') {
+          if (!date) {
             return res.status(400).json({
               status: 'error',
-              message: 'Invalid date format'
+              message: 'Date is required'
             });
           }
           
-          // If date is already in YYYY-MM-DD format, use it directly
-          if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-            normalizedDate = date;
-          } else if (date.includes('T')) {
-            // If date includes time, extract just the date part
-            normalizedDate = date.split('T')[0];
-          } else {
-            // Try to parse and reformat
-            const testDate = new Date(date + 'T12:00:00'); // Add noon to avoid timezone issues
-            if (isNaN(testDate.getTime())) {
-              return res.status(400).json({
-                status: 'error',
-                message: 'Invalid date format'
-              });
-            }
-            const year = testDate.getFullYear();
-            const month = String(testDate.getMonth() + 1).padStart(2, '0');
-            const day = String(testDate.getDate()).padStart(2, '0');
-            normalizedDate = `${year}-${month}-${day}`;
-          }
+          // Use toUTCDateString for consistent date formatting
+          normalizedDate = toUTCDateString(date);
         } catch (err) {
           return res.status(400).json({
             status: 'error',
             message: 'Invalid date format: ' + err.message
           });
+        }
+        
+        // Check for reservation conflicts before setting availability
+        if (is_available !== false) { // Only check when setting as available
+          const conflicts = await checkReservationConflicts(
+            listingId,
+            finalStartDateTime,
+            finalEndDateTime
+          );
+          
+          if (conflicts.length > 0) {
+            const conflictDetails = conflicts.map(booking => ({
+              booking_id: booking.id,
+              start: booking.start_datetime,
+              end: booking.end_datetime,
+              status: booking.status
+            }));
+            
+            return res.status(409).json({
+              status: 'error',
+              message: 'Cannot set availability for this time slot. There are existing reservations that conflict with this availability.',
+              conflicts: conflictDetails
+            });
+          }
         }
         
         // Check if this is a recurring availability
@@ -1823,12 +2087,46 @@ const hostController = {
             const addedAvailabilities = [];
             
             // Add availability for each date
+            const conflictingDates = [];
+            const successfulDates = [];
+            
             for (const currentDate of dates) {
-              // Convert each date to YYYY-MM-DD format avoiding timezone shifts
-              const year = currentDate.getFullYear();
-              const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-              const day = String(currentDate.getDate()).padStart(2, '0');
-              const formattedDate = `${year}-${month}-${day}`;
+              // Use toUTCDateString for consistent date formatting
+              const formattedDate = toUTCDateString(currentDate);
+              
+              // Determine end date for overnight bookings
+              let conflictEndDate = null;
+              if (is_overnight && end_date) {
+                conflictEndDate = toUTCDateString(end_date);
+              }
+              
+              // Create unified datetime for this specific date
+              const currentStartDateTime = createUTCDateTime(formattedDate, start_time || '00:00:00');
+              const currentEndDateTime = is_overnight && conflictEndDate 
+                ? createUTCDateTime(conflictEndDate, end_time || '23:59:59')
+                : createUTCDateTime(formattedDate, end_time || '23:59:59');
+              
+              // Check for reservation conflicts for this specific date
+              if (is_available !== false) { // Only check when setting as available
+                const conflicts = await checkReservationConflicts(
+                  listingId,
+                  currentStartDateTime,
+                  currentEndDateTime
+                );
+                
+                if (conflicts.length > 0) {
+                  conflictingDates.push({
+                    date: formattedDate,
+                    conflicts: conflicts.map(booking => ({
+                      booking_id: booking.id,
+                      start: booking.start_datetime,
+                      end: booking.end_datetime,
+                      status: booking.status
+                    }))
+                  });
+                  continue; // Skip this date and move to next
+                }
+              }
               
               // Check if there's an existing availability for this date and time
               const [existingAvailability] = await connection.query(
@@ -1837,44 +2135,69 @@ const hostController = {
               );
               
               if (existingAvailability) {
-                // Update existing availability
+                // Update existing availability with unified datetime
                 await connection.query(
-                  'UPDATE availability SET is_available = ? WHERE id = ?',
-                  [is_available, existingAvailability.id]
+                  'UPDATE availability SET is_available = ?, unified_start_datetime = ?, unified_end_datetime = ? WHERE id = ?',
+                  [is_available, currentStartDateTime, currentEndDateTime, existingAvailability.id]
                 );
                 
-                addedAvailabilities.push({
+                const availabilityData = {
                   id: existingAvailability.id,
                   listing_id: listingId,
                   date: formattedDate,
                   start_time,
                   end_time,
-                  is_available
-                });
+                  end_date: is_overnight ? conflictEndDate : null,
+                  is_overnight: Boolean(is_overnight),
+                  is_available,
+                  unified_start_datetime: currentStartDateTime,
+                  unified_end_datetime: currentEndDateTime
+                };
+                addedAvailabilities.push(availabilityData);
+                successfulDates.push(formattedDate);
               } else {
-                // Add new availability
+                // Add new availability with unified datetime
                 const [result] = await connection.query(
-                  'INSERT INTO availability (listing_id, date, start_time, end_time, is_available) VALUES (?, ?, ?, ?, ?)',
-                  [listingId, formattedDate, start_time, end_time, is_available]
+                  'INSERT INTO availability (listing_id, date, start_time, end_time, end_date, is_overnight, is_available, unified_start_datetime, unified_end_datetime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                  [listingId, formattedDate, start_time, end_time, is_overnight ? conflictEndDate : null, Boolean(is_overnight), is_available, currentStartDateTime, currentEndDateTime]
                 );
                 
-                addedAvailabilities.push({
+                const availabilityData = {
                   id: result.insertId,
                   listing_id: listingId,
                   date: formattedDate,
                   start_time,
                   end_time,
-                  is_available
-                });
+                  end_date: is_overnight ? conflictEndDate : null,
+                  is_overnight: Boolean(is_overnight),
+                  is_available,
+                  unified_start_datetime: currentStartDateTime,
+                  unified_end_datetime: currentEndDateTime
+                };
+                addedAvailabilities.push(availabilityData);
+                successfulDates.push(formattedDate);
               }
             }
             
             await connection.commit();
             
-            res.status(201).json({
-              status: 'success',
-              data: addedAvailabilities
-            });
+            // Prepare response based on conflicts
+            if (conflictingDates.length > 0) {
+              res.status(207).json({ // 207 Multi-Status for partial success
+                status: 'partial_success',
+                message: `${successfulDates.length} dates were set as available, but ${conflictingDates.length} dates had conflicts with existing reservations`,
+                data: {
+                  successful_availabilities: addedAvailabilities,
+                  successful_dates: successfulDates,
+                  conflicting_dates: conflictingDates
+                }
+              });
+            } else {
+              res.status(201).json({
+                status: 'success',
+                data: addedAvailabilities
+              });
+            }
           } catch (error) {
             await connection.rollback();
             throw error;
@@ -1943,6 +2266,14 @@ const hostController = {
         const userId = req.user.id;
         const { listingId, availabilityId } = req.params;
         
+        // Check if this is a partial availability ID (generated dynamically)
+        if (typeof availabilityId === 'string' && availabilityId.includes('_partial_')) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Cannot delete partial availability slots. These are generated dynamically based on bookings.'
+          });
+        }
+        
         // Check if listing exists and belongs to user
         const [listing] = await db.query(
           'SELECT * FROM listings WHERE id = ? AND user_id = ?',
@@ -1956,10 +2287,19 @@ const hostController = {
           });
         }
         
+        // Validate that availabilityId is a valid integer
+        const numericAvailabilityId = parseInt(availabilityId, 10);
+        if (isNaN(numericAvailabilityId) || numericAvailabilityId.toString() !== availabilityId.toString()) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid availability ID format'
+          });
+        }
+        
         // Check if availability exists and belongs to the listing
         const [availability] = await db.query(
           'SELECT * FROM availability WHERE id = ? AND listing_id = ?',
-          [availabilityId, listingId]
+          [numericAvailabilityId, listingId]
         );
         
         if (!availability) {
@@ -1970,7 +2310,7 @@ const hostController = {
         }
         
         // Delete availability
-        await db.query('DELETE FROM availability WHERE id = ?', [availabilityId]);
+        await db.query('DELETE FROM availability WHERE id = ?', [numericAvailabilityId]);
         
         res.status(200).json({
           status: 'success',
@@ -2093,4 +2433,4 @@ const hostController = {
 
 };
 
-module.exports = hostController; 
+module.exports = hostController;

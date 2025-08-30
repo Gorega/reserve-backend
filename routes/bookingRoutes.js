@@ -95,4 +95,14 @@ router.post(
   bookingController.processPayment
 );
 
-module.exports = router; 
+/**
+ * @route   GET /api/bookings/time-slots/:listing_id
+ * @desc    Get available time slots for a listing on a specific date
+ * @access  Public
+ */
+router.get(
+  '/time-slots/:listing_id',
+  bookingController.getAvailableTimeSlots
+);
+
+module.exports = router;

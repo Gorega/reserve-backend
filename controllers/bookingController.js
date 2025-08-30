@@ -334,7 +334,105 @@ const bookingController = {
       next(error);
     }
   },
-  
+
+  /**
+   * Get booking data that affects availability for a specific listing
+   * Used by guest reservation screens to show booked time slots
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getListingBookings(req, res, next) {
+    try {
+      const { listingId } = req.params;
+      const { start_date, end_date } = req.query;
+      
+      console.log(`[DEBUG] Getting bookings for listing ${listingId}`);
+      
+      // Check if listing exists
+      const listing = await listingModel.getById(listingId);
+      if (!listing) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Listing not found'
+        });
+      }
+      
+      // Build query to get bookings that affect availability
+      let query = `
+        SELECT 
+          b.id,
+          b.listing_id,
+          b.start_datetime,
+          b.end_datetime,
+          b.status,
+          b.guests_count,
+          b.total_price,
+          b.created_at,
+          u.name as guest_name,
+          l.title as listing_title,
+          l.unit_type as listing_unit_type
+        FROM bookings b
+        JOIN users u ON b.user_id = u.id
+        JOIN listings l ON b.listing_id = l.id
+        WHERE b.listing_id = ? 
+        AND b.status IN ('pending', 'confirmed', 'completed')
+      `;
+      
+      const params = [listingId];
+      
+      // Add date range filter if provided
+      if (start_date && end_date) {
+        query += ` AND (
+          (DATE(b.start_datetime) >= ? AND DATE(b.start_datetime) <= ?) OR
+          (DATE(b.end_datetime) >= ? AND DATE(b.end_datetime) <= ?) OR
+          (DATE(b.start_datetime) <= ? AND DATE(b.end_datetime) >= ?)
+        )`;
+        params.push(start_date, end_date, start_date, end_date, start_date, end_date);
+      }
+      
+      query += ` ORDER BY b.start_datetime ASC`;
+      
+      console.log(`[DEBUG] Executing query:`, query);
+      console.log(`[DEBUG] With params:`, params);
+      
+      const bookings = await db.query(query, params);
+      
+      console.log(`[DEBUG] Found ${bookings.length} bookings for listing ${listingId}`);
+      
+      // Format bookings for guest availability display
+      const formattedBookings = bookings.map(booking => ({
+        id: booking.id,
+        listing_id: booking.listing_id,
+        start_datetime: booking.start_datetime,
+        end_datetime: booking.end_datetime,
+        status: booking.status,
+        guests_count: booking.guests_count,
+        total_price: booking.total_price,
+        guest_name: booking.guest_name,
+        listing_title: booking.listing_title,
+        unit_type: booking.listing_unit_type,
+        is_booked: true,
+        is_available: false,
+        type: 'booking',
+        reason: `Booked by ${booking.guest_name} (${booking.status})`
+      }));
+      
+      res.status(200).json({
+        status: 'success',
+        data: {
+          listing_id: listingId,
+          bookings: formattedBookings,
+          total_count: formattedBookings.length
+        }
+      });
+      
+    } catch (error) {
+      console.error('Error getting listing bookings:', error);
+      next(error);
+    }
+  },
+
   /**
    * Process payment for a booking
    * @param {Object} req - Express request object
@@ -377,7 +475,47 @@ const bookingController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  /**
+   * Get available time slots for a listing on a specific date
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getAvailableTimeSlots(req, res, next) {
+    try {
+      const listingId = parseInt(req.params.listing_id);
+      const date = req.query.date;
+      
+      if (!listingId) {
+        return next(badRequest('Listing ID is required'));
+      }
+      
+      if (!date) {
+        return next(badRequest('Date parameter is required'));
+      }
+      
+      // Validate date format (YYYY-MM-DD)
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(date)) {
+        return next(badRequest('Date must be in YYYY-MM-DD format'));
+      }
+      
+      // Get available time slots using the bookingModel helper method
+      const timeSlots = await bookingModel.getAvailableTimeSlots(listingId, date);
+      
+      res.status(200).json({
+        status: 'success',
+        data: timeSlots,
+        message: `Found ${timeSlots.length} available time slots for ${date}`
+      });
+      
+    } catch (error) {
+      console.error('Error getting available time slots:', error);
+      next(error);
+    }
   }
 };
 
-module.exports = bookingController; 
+module.exports = bookingController;
