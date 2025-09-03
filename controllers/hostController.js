@@ -332,6 +332,74 @@ const subtractReservationsFromSlots = (slots, reservations) => {
 };
 
 /**
+ * Split available slots into duration-based time periods
+ * @param {Array} slots - Array of available slots with start and end timestamps
+ * @param {number} durationHours - Duration in hours for each slot
+ * @param {string} bookingType - Booking type ('daily', 'hourly', etc.)
+ * @returns {Array} Array of duration-based time slots
+ */
+const generateDurationBasedSlots = (slots, durationHours = 1, bookingType = 'hourly') => {
+  const durationSlots = [];
+  
+  for (const slot of slots) {
+    // For daily/night bookings, don't split further - keep as full periods
+    if (bookingType === 'daily' || bookingType === 'night') {
+      durationSlots.push({
+        ...slot,
+        booking_duration_hours: Math.ceil((slot.end - slot.start) / (1000 * 60 * 60))
+      });
+      continue;
+    }
+    
+    // For hourly bookings, split into duration-based slots
+    const slotDurationMs = slot.end - slot.start;
+    const requestedDurationMs = durationHours * 60 * 60 * 1000;
+    
+    // If the slot is shorter than the requested duration, skip it
+    if (slotDurationMs < requestedDurationMs) {
+      continue;
+    }
+    
+    // Generate consecutive slots of the specified duration
+    let currentStart = slot.start;
+    let slotIndex = 1;
+    
+    while (currentStart + requestedDurationMs <= slot.end) {
+      const currentEnd = currentStart + requestedDurationMs;
+      
+      durationSlots.push({
+        ...slot,
+        start: currentStart,
+        end: currentEnd,
+        id: `${slot.id}_duration_${slotIndex}`,
+        slot_type: slot.slot_type === 'split' ? 'split_duration' : 'duration',
+        booking_duration_hours: durationHours
+      });
+      
+      currentStart = currentEnd;
+      slotIndex++;
+    }
+    
+    // Handle remaining time if it's significant (at least 50% of duration)
+    const remainingMs = slot.end - currentStart;
+    const remainingHours = remainingMs / (1000 * 60 * 60);
+    
+    if (remainingHours >= durationHours * 0.5) {
+      durationSlots.push({
+        ...slot,
+        start: currentStart,
+        end: slot.end,
+        id: `${slot.id}_duration_${slotIndex}_partial`,
+        slot_type: slot.slot_type === 'split' ? 'split_partial' : 'partial',
+        booking_duration_hours: remainingHours
+      });
+    }
+  }
+  
+  return durationSlots;
+};
+
+/**
  * Convert slots with timestamp format to datetime format for database storage
  * @param {Array} slots - Array of slots with start/end timestamps
  * @returns {Array} Array of slots with start_datetime/end_datetime
@@ -373,7 +441,7 @@ const cleanupAvailableSlots = async (listingId) => {
         SELECT id, start_datetime, end_datetime, status
         FROM bookings 
         WHERE listing_id = ? 
-        AND status IN ('pending', 'confirmed')
+        AND status IN ('pending', 'confirmed', 'completed')
       `, [listingId]);
       
       // Get all blocked dates for this listing
@@ -481,12 +549,12 @@ const getAvailableSlots = async (listingId, startDate, endDate, options = {}) =>
       return [];
     }
     
-    // Get all confirmed and pending bookings for this listing in the date range
+    // Get all confirmed, pending, and completed bookings for this listing in the date range
     const bookings = await db.query(`
       SELECT id, start_datetime, end_datetime, status
       FROM bookings 
       WHERE listing_id = ? 
-      AND status IN ('pending', 'confirmed')
+      AND status IN ('pending', 'confirmed', 'completed')
       AND start_datetime < ?
       AND end_datetime > ?
     `, [listingId, endDateTime, startDateTime]);
@@ -539,6 +607,342 @@ const getAvailableSlots = async (listingId, startDate, endDate, options = {}) =>
     }));
   } catch (error) {
     console.error('❌ Error getting available slots:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get available time slots for public users with enhanced duration-based splitting
+ * @param {number} listingId - The listing ID
+ * @param {string} startDate - Start date in YYYY-MM-DD format
+ * @param {string} endDate - End date in YYYY-MM-DD format
+ * @param {Object} options - Additional options including duration preferences
+ * @returns {Promise<Array>} Array of available time slots with duration-based splitting
+ */
+const getPublicAvailableSlots = async (listingId, startDate, endDate, options = {}) => {
+  try {    
+    // Get listing details including unit_type and pricing options
+    const [listing] = await db.query(`
+      SELECT l.*, l.booking_type, l.slot_duration, l.unit_type
+      FROM listings l
+      WHERE l.id = ? AND l.active = 1
+    `, [listingId]);
+    
+    if (!listing) {
+      throw new Error('Listing not found');
+    }
+    
+    // Get pricing options to determine preferred duration and unit type
+    const pricingOptionModel = require('../models/pricingOptionModel');
+    const pricingOptions = await pricingOptionModel.getByListingId(listingId);
+    
+    // Determine unit type and duration from pricing options or listing settings
+    let unitType = listing.unit_type || 'hour';
+    let slotDuration = 1; // Default 1 hour
+    
+    if (pricingOptions && pricingOptions.length > 0) {
+      const defaultOption = pricingOptions.find(option => option.is_default) || pricingOptions[0];
+      unitType = defaultOption.unit_type || unitType;
+      slotDuration = defaultOption.duration || 1;
+    } else if (listing.slot_duration) {
+      slotDuration = listing.slot_duration;
+    }
+        
+    // Convert dates to datetime format for comparison
+    const startDateTime = `${startDate} 00:00:00`;
+    const endDateTime = `${endDate} 23:59:59`;
+    
+    // Get all base available slots from the available_slots table
+    const baseSlots = await db.query(`
+      SELECT * FROM available_slots
+      WHERE listing_id = ?
+      AND start_datetime < ?
+      AND end_datetime > ?
+      AND is_available = TRUE
+      ORDER BY start_datetime ASC
+    `, [listingId, endDateTime, startDateTime]);
+        
+    if (baseSlots.length === 0) {
+      return [];
+    }
+        
+    // Get all confirmed, pending, and completed bookings for this listing in the date range
+    const bookings = await db.query(`
+      SELECT id, start_datetime, end_datetime, status
+      FROM bookings 
+      WHERE listing_id = ? 
+      AND status IN ('pending', 'confirmed', 'completed')
+      AND start_datetime < ?
+      AND end_datetime > ?
+    `, [listingId, endDateTime, startDateTime]);
+    
+    // Get all blocked dates for this listing in the date range
+    const blockedDates = await db.query(`
+      SELECT id, start_datetime, end_datetime
+      FROM blocked_dates 
+      WHERE listing_id = ?
+      AND start_datetime < ?
+      AND end_datetime > ?
+    `, [listingId, endDateTime, startDateTime]);
+        
+    // Apply different logic based on unit_type
+    if (unitType === 'hour') {
+      // Convert base slots to timestamp format for splitting algorithm
+      const slotsWithTimestamps = baseSlots.map(slot => ({
+        ...slot,
+        start: new Date(slot.start_datetime).getTime(),
+        end: new Date(slot.end_datetime).getTime()
+      }));
+      
+      // Convert reservations to timestamp format
+      const allReservations = [
+        ...bookings.map(b => ({
+          id: `booking_${b.id}`,
+          start: new Date(b.start_datetime).getTime(),
+          end: new Date(b.end_datetime).getTime(),
+          type: 'booking'
+        })),
+        ...blockedDates.map(bd => ({
+          id: `blocked_${bd.id}`,
+          start: new Date(bd.start_datetime).getTime(),
+          end: new Date(bd.end_datetime).getTime(),
+          type: 'blocked'
+        }))
+      ];
+      
+      // Step 1: Apply slot splitting logic to subtract reservations
+      const splitSlots = subtractReservationsFromSlots(slotsWithTimestamps, allReservations);
+      
+      // Step 2: Apply duration-based slot generation
+      const durationSlots = generateDurationBasedSlots(splitSlots, slotDuration, listing.booking_type);
+      
+      // Convert back to datetime format and return
+      const finalSlots = durationSlots.map(slot => ({
+        id: slot.id,
+        listing_id: slot.listing_id,
+        start_datetime: toMySQLDateTime(new Date(slot.start)),
+        end_datetime: toMySQLDateTime(new Date(slot.end)),
+        slot_type: slot.slot_type || 'duration',
+        price_override: slot.price_override,
+        booking_type: slot.booking_type || listing.booking_type,
+        slot_duration: slotDuration,
+        booking_duration_hours: slot.booking_duration_hours || slotDuration,
+        unit_type: unitType
+      }));
+      
+      return finalSlots;
+      
+    } else if (unitType === 'day') {
+      // Day logic: treat each calendar date as a unit, bookings block whole days
+      
+      const availableDays = [];
+      const blockedDayStrings = new Set();
+      
+      // Mark blocked days from bookings (entire day blocked)
+      bookings.forEach(booking => {
+        const start = new Date(booking.start_datetime);
+        const end = new Date(booking.end_datetime);
+        let currentDate = new Date(start);
+        currentDate.setHours(0, 0, 0, 0);
+        
+        // Block all days from start to end (inclusive)
+        while (currentDate <= end) {
+          const dayString = currentDate.toISOString().split('T')[0];
+          blockedDayStrings.add(dayString);
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      });
+      
+      // Mark blocked days from blocked_dates
+      blockedDates.forEach(blocked => {
+        const start = new Date(blocked.start_datetime);
+        const end = new Date(blocked.end_datetime);
+        let currentDate = new Date(start);
+        currentDate.setHours(0, 0, 0, 0);
+        
+        while (currentDate <= end) {
+          const dayString = currentDate.toISOString().split('T')[0];
+          blockedDayStrings.add(dayString);
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      });
+      
+      // Process base slots to find available days
+      baseSlots.forEach(slot => {
+        const start = new Date(slot.start_datetime);
+        const end = new Date(slot.end_datetime);
+        let currentDate = new Date(start);
+        currentDate.setHours(0, 0, 0, 0);
+        
+        while (currentDate < end) {
+          const dayString = currentDate.toISOString().split('T')[0];
+          
+          // Only add if not blocked
+          if (!blockedDayStrings.has(dayString)) {
+            const dayStart = new Date(currentDate);
+            dayStart.setHours(0, 0, 0, 0);
+            const dayEnd = new Date(currentDate);
+            dayEnd.setHours(23, 59, 59, 999);
+            
+            availableDays.push({
+              id: `day_${slot.id}_${dayString}`,
+              listing_id: slot.listing_id,
+              start_datetime: toMySQLDateTime(dayStart),
+              end_datetime: toMySQLDateTime(dayEnd),
+              slot_type: 'daily',
+              price_override: slot.price_override,
+              booking_type: 'daily',
+              slot_duration: slotDuration,
+              booking_duration_hours: 24,
+              unit_type: unitType,
+              date_string: dayString
+            });
+          }
+          
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      });
+      
+      return availableDays;
+      
+    } else if (unitType === 'night') {
+      // Night logic: treat each night as a unit, booking blocks from check-in date to checkout morning
+      
+      const availableSlots = [];
+      const blockedNightStrings = new Set();
+      
+      // Mark blocked nights from bookings
+      bookings.forEach(booking => {
+        const checkIn = new Date(booking.start_datetime);
+        const checkOut = new Date(booking.end_datetime);
+        let currentNight = new Date(checkIn);
+        currentNight.setHours(0, 0, 0, 0);
+        
+        // Block nights from check-in to check-out (night = check-in date)
+        while (currentNight < checkOut) {
+          const nightString = currentNight.toISOString().split('T')[0];
+          blockedNightStrings.add(nightString);
+          currentNight.setDate(currentNight.getDate() + 1);
+        }
+      });
+      
+      // Mark blocked nights from blocked_dates
+      blockedDates.forEach(blocked => {
+        const start = new Date(blocked.start_datetime);
+        const end = new Date(blocked.end_datetime);
+        let currentNight = new Date(start);
+        currentNight.setHours(0, 0, 0, 0);
+        
+        while (currentNight < end) {
+          const nightString = currentNight.toISOString().split('T')[0];
+          blockedNightStrings.add(nightString);
+          currentNight.setDate(currentNight.getDate() + 1);
+        }
+      });
+      
+      // Helper function to determine slot type based on time range
+      const determineSlotType = (startTime, endTime) => {
+        const startHour = startTime.getHours();
+        const endHour = endTime.getHours();
+        const isOvernight = endTime.getDate() > startTime.getDate();
+        
+        // Morning/Day slots: start between 6 AM - 2 PM
+        if (startHour >= 6 && startHour <= 14 && !isOvernight) {
+          return { type: 'day', booking_type: 'daily' };
+        }
+        // Night slots: start after 3 PM or overnight
+        else if (startHour >= 15 || isOvernight) {
+          return { type: 'night', booking_type: 'night' };
+        }
+        // Default to night for edge cases
+        else {
+          return { type: 'night', booking_type: 'night' };
+        }
+      };
+      
+      // Process base slots to find available periods
+      baseSlots.forEach(slot => {
+        const start = new Date(slot.start_datetime);
+        const end = new Date(slot.end_datetime);
+        const slotStart = new Date(slot.start_datetime);
+        const slotEnd = new Date(slot.end_datetime);
+        
+        // Determine the actual slot type based on time range
+        const slotTypeInfo = determineSlotType(slotStart, slotEnd);
+        const isOvernight = slotEnd.getDate() > slotStart.getDate();
+        
+        let currentDate = new Date(start);
+        currentDate.setHours(0, 0, 0, 0);
+        
+        while (currentDate < end) {
+          const dateString = currentDate.toISOString().split('T')[0];
+          
+          // CRITICAL FIX: For overnight slots, don't create availability for the checkout date
+          // Only the check-in date should be available for booking
+          if (isOvernight) {
+            const checkoutDate = new Date(currentDate);
+            checkoutDate.setDate(checkoutDate.getDate() + 1);
+            const checkoutDateString = checkoutDate.toISOString().split('T')[0];
+            
+            // Skip if this is the checkout date of an overnight slot
+            if (dateString === checkoutDateString && currentDate.getTime() !== start.getTime()) {
+              currentDate.setDate(currentDate.getDate() + 1);
+              continue;
+            }
+          }
+          
+          // Only add if not blocked
+          if (!blockedNightStrings.has(dateString)) {
+            // Extract time components from host-specified slot times
+            const checkInHour = slotStart.getHours();
+            const checkInMinute = slotStart.getMinutes();
+            const checkOutHour = slotEnd.getHours();
+            const checkOutMinute = slotEnd.getMinutes();
+            
+            const periodStart = new Date(currentDate);
+            periodStart.setHours(checkInHour, checkInMinute, 0, 0);
+            const periodEnd = new Date(currentDate);
+            
+            // Handle overnight slots
+            if (isOvernight) {
+              periodEnd.setDate(periodEnd.getDate() + 1);
+            }
+            periodEnd.setHours(checkOutHour, checkOutMinute, 0, 0);
+            
+            // Calculate actual booking duration in hours
+            const bookingDurationMs = periodEnd.getTime() - periodStart.getTime();
+            const bookingDurationHours = Math.round(bookingDurationMs / (1000 * 60 * 60));
+            
+            availableSlots.push({
+              id: `${slotTypeInfo.type}_${slot.id}_${dateString}`,
+              listing_id: slot.listing_id,
+              start_datetime: toMySQLDateTime(periodStart),
+              end_datetime: toMySQLDateTime(periodEnd),
+              slot_type: 'regular', // Use valid ENUM value from available_slots table
+              price_override: slot.price_override,
+              booking_type: slotTypeInfo.booking_type,
+              slot_duration: slotDuration,
+              booking_duration_hours: bookingDurationHours,
+              unit_type: slotTypeInfo.type, // Keep the actual type (day/night) in unit_type
+              date_string: dateString
+            });
+          }
+          
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      });
+      
+      return availableSlots;
+      
+    } else {
+      // For multi-day bookings, we need to check if entire ranges are available
+      // This is more complex and would require special handling
+      // For now, fall back to daily logic
+      return getPublicAvailableSlots(listingId, startDate, endDate, { ...options, unitType: 'day' });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error getting public available slots:', error);
     throw error;
   }
 };
@@ -1206,7 +1610,7 @@ const hostController = {
         WHERE l.user_id = ? 
         AND DATE(b.start_datetime) > ? 
         AND DATE(b.start_datetime) <= ?
-        AND b.status IN ('pending', 'confirmed')
+        AND b.status IN ('pending', 'confirmed', 'completed')
         ORDER BY b.start_datetime ASC
       `, [userId, today, thirtyDaysLaterStr]);
             
@@ -1650,7 +2054,7 @@ const hostController = {
       // Check for conflicts with existing bookings
       const bookings = await db.query(`
         SELECT * FROM bookings 
-        WHERE listing_id = ? AND status IN ('pending', 'confirmed')
+        WHERE listing_id = ? AND status IN ('pending', 'confirmed', 'completed')
         AND (
           (start_datetime <= ? AND end_datetime >= ?) OR
           (start_datetime <= ? AND end_datetime >= ?) OR
@@ -2674,8 +3078,13 @@ const hostController = {
 
 };
 
-// Export both the hostController and the cleanupAvailableSlots function
+// Export both the hostController and the utility functions
 module.exports = {
   ...hostController,
-  cleanupAvailableSlots
+  cleanupAvailableSlots,
+  getAvailableSlots,
+  getPublicAvailableSlots,
+  subtractReservationsFromSlots,
+  generateDurationBasedSlots,
+  toMySQLDateTime
 };

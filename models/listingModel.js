@@ -214,7 +214,7 @@ const listingModel = {
             filterConditions.push(`
               l.id NOT IN (
                 SELECT DISTINCT listing_id FROM bookings 
-                WHERE status IN ('pending', 'confirmed') 
+                WHERE status IN ('pending', 'confirmed', 'completed') 
                 AND (
                   (start_datetime <= ? AND end_datetime >= ?) OR
                   (start_datetime <= ? AND end_datetime >= ?) OR
@@ -1530,7 +1530,7 @@ const listingModel = {
    * @param {string} endDatetime - End datetime in ISO format
    * @returns {Promise<boolean>} - True if available, false if not
    */
-  async checkAvailability(listingId, startDatetime, endDatetime) {
+  async checkAvailability(listingId, startDatetime, endDatetime, bookingPeriod = null) {
     try {
       // Check if listing exists
       const listing = await this.getById(listingId);
@@ -1539,15 +1539,31 @@ const listingModel = {
         throw notFound('Listing not found');
       }
       
-      // Format datetime strings for MySQL - keep dates as YYYY-MM-DD to avoid timezone issues
+      // Format datetime strings for MySQL with proper timezone handling
       const formatDateForMySQL = (dateString) => {
+        // If already in MySQL format (YYYY-MM-DD HH:MM:SS), return as-is
+        if (dateString.includes(' ') && dateString.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)) {
+          return dateString;
+        }
+        // If just a date (YYYY-MM-DD), add default time
         if (!dateString.includes('T') && !dateString.includes(' ')) {
           return `${dateString} 00:00:00`;
-        } else {
-          const datePart = dateString.split('T')[0];
-          const timePart = dateString.includes('T') ? dateString.split('T')[1].split('.')[0] : '00:00:00';
-          return `${datePart} ${timePart}`;
         }
+        // If ISO format (YYYY-MM-DDTHH:MM:SS), convert from UTC to local time
+        if (dateString.includes('T')) {
+          const date = new Date(dateString);
+          // Convert to local time by adjusting for timezone offset
+          const localDate = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
+          const year = localDate.getFullYear();
+          const month = String(localDate.getMonth() + 1).padStart(2, '0');
+          const day = String(localDate.getDate()).padStart(2, '0');
+          const hours = String(localDate.getHours()).padStart(2, '0');
+          const minutes = String(localDate.getMinutes()).padStart(2, '0');
+          const seconds = String(localDate.getSeconds()).padStart(2, '0');
+          return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        }
+        // Fallback: return as-is
+        return dateString;
       };
       
       const formattedStartDatetime = formatDateForMySQL(startDatetime);
@@ -1567,34 +1583,267 @@ const listingModel = {
       
       const availabilityMode = listingSettings?.availability_mode || 'available-by-default';
       
-      // First, try to use the available_slots table for optimized checking
+      // CRITICAL FIX: For day/night listings with booking_period, use slot-based availability checking
+      if (bookingPeriod && ['morning', 'day', 'night'].includes(bookingPeriod) && 
+          (listing.unit_type === 'day' || listing.unit_type === 'night')) {
+        
+        // Get available slots for the date range using the same logic as frontend
+        const { getPublicAvailableSlots } = require('../controllers/listingController');
+        
+        // Convert MySQL datetime format to ISO format for Date constructor
+        const mysqlToIso = (mysqlDatetime) => {
+          if (!mysqlDatetime || typeof mysqlDatetime !== 'string') {
+            console.error('🚨 [DEBUG] Invalid mysqlDatetime input:', mysqlDatetime);
+            throw new Error('Invalid datetime input for mysqlToIso');
+          }
+          return mysqlDatetime.replace(' ', 'T') + 'Z';
+        };
+        
+        
+        let startDate, endDate;
+        try {
+          const startIso = mysqlToIso(formattedStartDatetime);
+          const endIso = mysqlToIso(formattedEndDatetime);
+          
+          
+          const startDateObj = new Date(startIso);
+          const endDateObj = new Date(endIso);
+          
+          if (isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
+            console.error('🚨 [DEBUG] Invalid Date objects created:', {
+              startDateObj: startDateObj.toString(),
+              endDateObj: endDateObj.toString(),
+              startIsValid: !isNaN(startDateObj.getTime()),
+              endIsValid: !isNaN(endDateObj.getTime())
+            });
+            throw new Error('Invalid Date objects created from datetime strings');
+          }
+          
+          startDate = startDateObj.toISOString().split('T')[0];
+          endDate = endDateObj.toISOString().split('T')[0];
+          
+        } catch (dateError) {
+          console.error('🚨 [DEBUG] Error in date conversion:', dateError);
+          throw dateError;
+        }
+        
+        try {
+          const availableSlots = await getPublicAvailableSlots(listingId, startDate, endDate);
+          
+          
+          // Check if any slot matches the requested booking period and covers the time range
+          const hasMatchingSlot = availableSlots.some(slot => {
+            const slotStart = new Date(slot.start_datetime);
+            const slotEnd = new Date(slot.end_datetime);
+            const requestStart = new Date(formattedStartDatetime);
+            const requestEnd = new Date(formattedEndDatetime);
+            
+            // Slot must cover the entire requested period
+            const coversTimeRange = slotStart <= requestStart && slotEnd >= requestEnd;
+            
+            // For booking_period matching, check unit_type (slot_type is always 'regular' now)
+            let periodMatches = false;
+            if (bookingPeriod === 'morning' || bookingPeriod === 'day') {
+              // Check unit_type for day bookings
+              periodMatches = slot.unit_type === 'day';
+            } else if (bookingPeriod === 'night') {
+              // Check unit_type for night bookings
+              periodMatches = slot.unit_type === 'night';
+            }
+            
+            return coversTimeRange && periodMatches;
+          });
+          
+          return hasMatchingSlot;
+        } catch (slotError) {
+          console.error('Error checking slot availability for booking period:', slotError);
+          // Fall back to basic availability check below
+        }
+      }
+      
+      // CRITICAL FIX: Use the same logic as getPublicAvailableSlots to ensure consistency
       try {
-        // Check if the time slot is in the available_slots table
+        console.log('🔍 DEBUG: Checking available_slots table for listing:', listingId);
+        console.log('🔍 DEBUG: Formatted datetime range:', formattedStartDatetime, 'to', formattedEndDatetime);
+        
+        // Get all available slots for this listing that might overlap with our booking period
         const availableSlotsQuery = `
-          SELECT COUNT(*) as slot_count
+          SELECT start_datetime, end_datetime
           FROM available_slots
           WHERE listing_id = ?
-          AND start_datetime <= ?
-          AND end_datetime >= ?
           AND is_available = TRUE
+          AND (
+            (start_datetime <= ? AND end_datetime > ?) OR
+            (start_datetime < ? AND end_datetime >= ?) OR
+            (start_datetime >= ? AND start_datetime < ?)
+          )
+          ORDER BY start_datetime
         `;
         
-        const [availableSlotsResult] = await db.query(availableSlotsQuery, [
+        const availableSlots = await db.query(availableSlotsQuery, [
           listingId,
-          formattedStartDatetime,
-          formattedEndDatetime
+          formattedStartDatetime, formattedStartDatetime,
+          formattedEndDatetime, formattedEndDatetime,
+          formattedStartDatetime, formattedEndDatetime
         ]);
         
-        // If we have at least one matching available slot, the time is available
-        if (availableSlotsResult.slot_count > 0) {
-          return true;
+        console.log('🔍 DEBUG: Available slots query result:', availableSlots.length, 'slots found');
+        console.log('🔍 DEBUG: Available slots data:', JSON.stringify(availableSlots, null, 2));
+        
+        if (availableSlots.length === 0) {
+          console.log('❌ DEBUG: No available slots found for this time period');
+          return false;
         }
+        
+        // Check if any single slot covers the entire booking period
+        // Convert booking times back to UTC for proper comparison with slot times
+        const bookingStartUTC = new Date(startDatetime); // Original UTC time from frontend
+        const bookingEndUTC = new Date(endDatetime); // Original UTC time from frontend
+        
+        console.log('🔍 DEBUG: Booking period (formatted local):', formattedStartDatetime, 'to', formattedEndDatetime);
+        console.log('🔍 DEBUG: Booking period (original UTC):', bookingStartUTC.toISOString(), 'to', bookingEndUTC.toISOString());
+        
+        for (const slot of availableSlots) {
+          const slotStart = new Date(slot.start_datetime);
+          const slotEnd = new Date(slot.end_datetime);
+          
+          console.log('🔍 DEBUG: Checking slot:', slotStart.toISOString(), 'to', slotEnd.toISOString());
+          
+          // Check if the slot covers the entire booking period
+          // A slot covers a booking if it starts before or at the booking start time
+          // AND ends after or at the booking end time
+          const slotStartBeforeBooking = slotStart <= bookingStartUTC;
+          const slotEndAfterBooking = slotEnd >= bookingEndUTC;
+          const covers = slotStartBeforeBooking && slotEndAfterBooking;
+          
+          console.log('🔍 DEBUG: Slot covers booking?', {
+            slotStartBeforeBooking,
+            slotEndAfterBooking,
+            covers
+          });
+          
+          if (covers) {
+            // This slot covers the entire booking period, check for booking conflicts
+            console.log('🔍 DEBUG: Found covering slot:', slot.start_datetime, 'to', slot.end_datetime);
+            console.log('🔍 DEBUG: Checking for booking conflicts...');
+            // CRITICAL FIX: Use proper overlap detection for booking conflicts
+            // Two time periods overlap if: start1 < end2 AND start2 < end1
+            // But we need to exclude adjacent bookings (where end1 = start2 or end2 = start1)
+            const bookingsQuery = `
+              SELECT * FROM bookings 
+              WHERE listing_id = ? 
+              AND status IN ('pending', 'confirmed', 'completed')
+              AND start_datetime < ? AND end_datetime > ?
+            `;
+            
+            console.log('🔍 DEBUG: Booking conflict query parameters:');
+            console.log('🔍 DEBUG: listingId:', listingId);
+            console.log('🔍 DEBUG: endDatetime (new booking end):', endDatetime);
+            console.log('🔍 DEBUG: startDatetime (new booking start):', startDatetime);
+            
+            const allPotentialConflicts = await db.query(bookingsQuery, [
+              listingId,
+              endDatetime,
+              startDatetime
+            ]);
+            
+            console.log('🔍 DEBUG: Potential conflicts found:', allPotentialConflicts.length);
+            
+            // Filter out adjacent bookings (not actual conflicts)
+            const actualConflicts = allPotentialConflicts.filter(booking => {
+              const bookingStart = new Date(booking.start_datetime);
+              const bookingEnd = new Date(booking.end_datetime);
+              const newBookingStart = new Date(startDatetime);
+              const newBookingEnd = new Date(endDatetime);
+              
+              // Check for actual overlap (not just adjacency)
+              const hasOverlap = bookingStart < newBookingEnd && bookingEnd > newBookingStart;
+              
+              console.log(`🔍 DEBUG: Checking booking ${booking.id}:`);
+              console.log(`🔍 DEBUG: - Existing: ${bookingStart.toISOString()} to ${bookingEnd.toISOString()}`);
+              console.log(`🔍 DEBUG: - New: ${newBookingStart.toISOString()} to ${newBookingEnd.toISOString()}`);
+              console.log(`🔍 DEBUG: - Has overlap: ${hasOverlap}`);
+              
+              return hasOverlap;
+            });
+            
+            const bookings = actualConflicts;
+            
+            console.log('🔍 DEBUG: Booking conflicts found:', bookings.length);
+            console.log('🔍 DEBUG: Conflicting bookings:', JSON.stringify(bookings, null, 2));
+            
+            if (bookings.length === 0) {
+              console.log('✅ DEBUG: No conflicts found, slot is available!');
+              return true;
+            } else {
+              console.log('❌ DEBUG: Conflicts found, slot not available');
+            }
+          }
+        }
+        
+        console.log('❌ DEBUG: No single slot covers the entire booking period');
+        
+        // If no single slot covers the period, check for continuous coverage
+        const sortedSlots = availableSlots.sort((a, b) => 
+          new Date(a.start_datetime) - new Date(b.start_datetime)
+        );
+        
+        let currentCoverageEnd = bookingStartUTC;
+        
+        for (const slot of sortedSlots) {
+          const slotStart = new Date(slot.start_datetime);
+          const slotEnd = new Date(slot.end_datetime);
+          
+          // Skip slots that don't extend our coverage
+          if (slotStart > currentCoverageEnd || slotEnd <= currentCoverageEnd) {
+            continue;
+          }
+          
+          // If this slot connects to our current coverage
+          if (slotStart <= currentCoverageEnd) {
+            currentCoverageEnd = new Date(Math.max(currentCoverageEnd.getTime(), slotEnd.getTime()));
+            
+            // If we've covered the entire booking period
+            if (currentCoverageEnd >= bookingEndUTC) {
+              // Check for booking conflicts with proper overlap detection
+              const bookingsQuery = `
+                SELECT * FROM bookings 
+                WHERE listing_id = ? 
+                AND status IN ('pending', 'confirmed', 'completed')
+                AND start_datetime < ? AND end_datetime > ?
+              `;
+              
+              const allPotentialConflicts = await db.query(bookingsQuery, [
+                listingId,
+                endDatetime,
+                startDatetime
+              ]);
+              
+              // Filter out adjacent bookings (not actual conflicts)
+              const actualConflicts = allPotentialConflicts.filter(booking => {
+                const bookingStart = new Date(booking.start_datetime);
+                const bookingEnd = new Date(booking.end_datetime);
+                const newBookingStart = new Date(startDatetime);
+                const newBookingEnd = new Date(endDatetime);
+                
+                // Check for actual overlap (not just adjacency)
+                return bookingStart < newBookingEnd && bookingEnd > newBookingStart;
+              });
+              
+              return actualConflicts.length === 0;
+            }
+          }
+        }
+        
+        // If we couldn't find continuous coverage, return false
+        return false;
+        
       } catch (error) {
         console.error('Error checking available_slots table:', error);
         // If there's an error with the available_slots table, fall back to traditional checking
       }
       
-      // If available_slots check didn't return true, fall back to traditional availability checking
+      // If available_slots check didn't work, fall back to traditional availability checking
       if (availabilityMode === 'blocked-by-default') {
         // In blocked-by-default mode, check if dates are explicitly available
         const availabilityQuery = `
@@ -1645,7 +1894,7 @@ const listingModel = {
       const bookingsQuery = `
         SELECT * FROM bookings 
         WHERE listing_id = ? 
-        AND status IN ('pending', 'confirmed')
+        AND status IN ('pending', 'confirmed', 'completed')
         AND (
           (start_datetime <= ? AND end_datetime >= ?) OR
           (start_datetime <= ? AND end_datetime >= ?) OR

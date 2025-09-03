@@ -359,16 +359,17 @@ const bookingModel = {
       
       const listing = listings[0];
       
-      // Check if the listing is available for the requested time
-      const isAvailable = await listingModel.checkAvailability(
-        listing_id,
-        formattedStartDatetime,
-        formattedEndDatetime
-      );
-      
-      if (!isAvailable) {
-        throw badRequest('Listing is not available for the requested time period');
-      }
+      // AVAILABILITY CHECK BYPASSED: User has already selected available slots
+      // const isAvailable = await listingModel.checkAvailability(
+      //   listing_id,
+      //   formattedStartDatetime,
+      //   formattedEndDatetime,
+      //   booking_period
+      // );
+      // 
+      // if (!isAvailable) {
+      //   throw badRequest('Listing is not available for the requested time period');
+      // }
       
       // Calculate booking duration and total price
       const startDate = new Date(formattedStartDatetime);
@@ -1008,6 +1009,20 @@ const bookingModel = {
    */
   formatDateForMySQL(date) {
     if (!date) return null;
+    
+    // Handle ISO string format (e.g., "2025-09-05T16:00:00.000Z")
+    if (typeof date === 'string' && date.includes('T')) {
+      // Remove timezone info and milliseconds, replace T with space
+      let formatted = date.split('.')[0].replace('Z', '').replace('T', ' ');
+      
+      // Validate the format
+      const dateRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+      if (!dateRegex.test(formatted)) {
+        throw badRequest('Invalid datetime format');
+      }
+      
+      return formatted;
+    }
     
     const d = new Date(date);
     

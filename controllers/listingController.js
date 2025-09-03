@@ -1209,16 +1209,18 @@ const listingController = {
   async checkAvailability(req, res, next) {
     try {
       const { id } = req.params;
-      let start_datetime, end_datetime;
+      let start_datetime, end_datetime, booking_period;
       
       // Handle both GET and POST requests
       if (req.method === 'GET') {
         start_datetime = req.query.start_datetime || req.query.start_date;
         end_datetime = req.query.end_datetime || req.query.end_date;
+        booking_period = req.query.booking_period;
       } else {
         // POST method
         start_datetime = req.body.start_datetime || req.body.start_date;
         end_datetime = req.body.end_datetime || req.body.end_date;
+        booking_period = req.body.booking_period;
       }
       
       // Format dates if they don't include time
@@ -1236,8 +1238,66 @@ const listingController = {
           message: 'Start and end datetime are required'
         });
       }
+      
+      // CRITICAL FIX: For day/night listings with booking_period, check specific slot availability
+      if (booking_period && ['morning', 'day', 'night'].includes(booking_period)) {
+        // Get the listing to check its unit_type
+        const listing = await listingModel.getById(id);
+        if (!listing) {
+          return res.status(404).json({
+            status: 'error',
+            message: 'Listing not found'
+          });
+        }
+        
+        // For day/night listings, check if the specific period is available
+        if (listing.unit_type === 'day' || listing.unit_type === 'night') {
+          // Get available slots for the date range
+          const { getPublicAvailableSlots } = require('./hostController');
+          const startDate = new Date(start_datetime).toISOString().split('T')[0];
+          const endDate = new Date(end_datetime).toISOString().split('T')[0];
+          
+          try {
+            const availableSlots = await getPublicAvailableSlots(id, startDate, endDate);
             
-      const isAvailable = await listingModel.checkAvailability(id, start_datetime, end_datetime);
+            // Check if any slot matches the requested booking period
+            const hasMatchingSlot = availableSlots.some(slot => {
+              // Check if slot covers the requested time period
+              const slotStart = new Date(slot.start_datetime);
+              const slotEnd = new Date(slot.end_datetime);
+              const requestStart = new Date(start_datetime);
+              const requestEnd = new Date(end_datetime);
+              
+              // Slot must cover the entire requested period
+              const coversTimeRange = slotStart <= requestStart && slotEnd >= requestEnd;
+              
+              // For booking_period matching, check slot_type or unit_type
+              let periodMatches = false;
+              if (booking_period === 'morning' || booking_period === 'day') {
+                // Check unit_type for day bookings (slot_type is always 'regular' now)
+                periodMatches = slot.unit_type === 'day';
+              } else if (booking_period === 'night') {
+                // Check unit_type for night bookings (slot_type is always 'regular' now)
+                periodMatches = slot.unit_type === 'night';
+              }
+              
+              return coversTimeRange && periodMatches;
+            });
+            
+            return res.status(200).json({
+              status: 'success',
+              data: {
+                is_available: hasMatchingSlot
+              }
+            });
+          } catch (slotError) {
+            console.error('Error checking slot availability:', slotError);
+            // Fall back to basic availability check
+          }
+        }
+      }
+            
+      const isAvailable = await listingModel.checkAvailability(id, start_datetime, end_datetime, booking_period);
       
       res.status(200).json({
         status: 'success',
@@ -1345,7 +1405,7 @@ const listingController = {
       // Get existing bookings for the specific date to filter out booked time slots
       const existingBookings = await db.query(
         `SELECT start_datetime, end_datetime FROM bookings 
-         WHERE listing_id = ? AND status IN ('pending', 'confirmed') 
+         WHERE listing_id = ? AND status IN ('pending', 'confirmed', 'completed') 
          AND DATE(start_datetime) <= ? AND DATE(end_datetime) >= ?`,
         [id, formattedDate, formattedDate]
       );
@@ -1513,6 +1573,284 @@ const listingController = {
     } catch (error) {
       console.error('Error calculating unified pricing:', error);
       next(error);
+    }
+  },
+
+  /**
+   * Get available time slots for a listing for public users (using same logic as host calendar)
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getPublicAvailableSlots(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { start_date, end_date } = req.query;
+      
+      // Validate required parameters
+      if (!start_date || !end_date) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'start_date and end_date are required'
+        });
+      }
+      
+      // Check if listing exists and get its details
+      const [listing] = await db.query(
+        'SELECT * FROM listings WHERE id = ? AND active = 1',
+        [id]
+      );
+      
+      if (!listing) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Listing not found or not active'
+        });
+      }
+      
+      // Import the getPublicAvailableSlots function from hostController which already handles duration-based splitting
+      const { getPublicAvailableSlots } = require('./hostController');
+      
+      // Get available slots using the enhanced public logic that handles slot duration correctly
+      const availableSlots = await getPublicAvailableSlots(id, start_date, end_date);
+      
+      res.status(200).json({
+        status: 'success',
+        results: availableSlots.length,
+        data: availableSlots
+      });
+    } catch (error) {
+      console.error('Error getting public available slots:', error);
+      next(serverError('Failed to get available slots'));
+    }
+  },
+
+  /**
+   * Get reservations for a listing for public users (for calendar display)
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getPublicReservations(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { start_date, end_date } = req.query;
+      
+      // Check if listing exists
+      const [listing] = await db.query(
+        'SELECT * FROM listings WHERE id = ? AND active = 1',
+        [id]
+      );
+      
+      if (!listing) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Listing not found or not active'
+        });
+      }
+      
+      // Get date range for filtering
+      let startDateTime, endDateTime;
+      if (start_date && end_date) {
+        startDateTime = `${start_date} 00:00:00`;
+        endDateTime = `${end_date} 23:59:59`;
+      } else {
+        // Default to next 90 days
+        const today = new Date();
+        const futureDate = new Date(today);
+        futureDate.setDate(today.getDate() + 90);
+        startDateTime = `${today.toISOString().split('T')[0]} 00:00:00`;
+        endDateTime = `${futureDate.toISOString().split('T')[0]} 23:59:59`;
+      }
+      
+      // Import toMySQLDateTime helper function from hostController
+      const { toMySQLDateTime } = require('./hostController');
+      
+      // Get confirmed and pending bookings (don't show guest details for privacy)
+      const reservations = await db.query(`
+        SELECT DISTINCT b.id, b.start_datetime as check_in_date, b.end_datetime as check_out_date, 
+               b.status, b.created_at
+        FROM bookings b
+        WHERE b.listing_id = ? 
+        AND b.status IN ('pending', 'confirmed', 'completed')
+        AND b.start_datetime < ?
+        AND b.end_datetime > ?
+        ORDER BY b.start_datetime ASC
+      `, [id, endDateTime, startDateTime]);
+      
+      // Format reservations for frontend (same format as host calendar)
+      const formattedReservations = reservations.map(booking => {
+        // Convert to consistent MySQL datetime format without timezone issues
+        let startDate, endDate;
+        
+        if (booking.check_in_date instanceof Date) {
+          startDate = toMySQLDateTime(booking.check_in_date).replace(' ', 'T');
+        } else {
+          // Convert MySQL datetime format to ISO format without Z suffix
+          startDate = typeof booking.check_in_date === 'string' ? 
+            booking.check_in_date.replace(' ', 'T').replace('Z', '') : booking.check_in_date;
+        }
+        
+        if (booking.check_out_date instanceof Date) {
+          endDate = toMySQLDateTime(booking.check_out_date).replace(' ', 'T');
+        } else {
+          // Convert MySQL datetime format to ISO format without Z suffix
+          endDate = typeof booking.check_out_date === 'string' ? 
+            booking.check_out_date.replace(' ', 'T').replace('Z', '') : booking.check_out_date;
+        }
+        
+        return {
+          id: booking.id,
+          type: 'reservation',
+          start_datetime: startDate.replace('T', ' '),
+          end_datetime: endDate.replace('T', ' '),
+          status: booking.status
+        };
+      });
+      
+      res.status(200).json({
+        status: 'success',
+        results: formattedReservations.length,
+        data: formattedReservations
+      });
+    } catch (error) {
+      console.error('Error getting public reservations:', error);
+      next(serverError('Failed to get reservations'));
+    }
+  },
+
+  /**
+   * Get blocked dates for a listing for public users
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getPublicBlockedDates(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { start_date, end_date } = req.query;
+      
+      // Check if listing exists
+      const [listing] = await db.query(
+        'SELECT * FROM listings WHERE id = ? AND active = 1',
+        [id]
+      );
+      
+      if (!listing) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Listing not found or not active'
+        });
+      }
+      
+      // Get date range for filtering
+      let startDateTime, endDateTime;
+      if (start_date && end_date) {
+        startDateTime = `${start_date} 00:00:00`;
+        endDateTime = `${end_date} 23:59:59`;
+      } else {
+        // Default to next 90 days
+        const today = new Date();
+        const futureDate = new Date(today);
+        futureDate.setDate(today.getDate() + 90);
+        startDateTime = `${today.toISOString().split('T')[0]} 00:00:00`;
+        endDateTime = `${futureDate.toISOString().split('T')[0]} 23:59:59`;
+      }
+      
+      // Import toMySQLDateTime helper function from hostController
+      const { toMySQLDateTime } = require('./hostController');
+      
+      // Get blocked dates
+      const blockedDates = await db.query(`
+        SELECT bd.id, bd.start_datetime, bd.end_datetime, bd.reason, bd.created_at
+        FROM blocked_dates bd
+        WHERE bd.listing_id = ?
+        AND bd.start_datetime < ?
+        AND bd.end_datetime > ?
+        ORDER BY bd.start_datetime ASC
+      `, [id, endDateTime, startDateTime]);
+      
+      // Format blocked dates for frontend (same format as host calendar)
+      const formattedBlockedDates = blockedDates.map(blocked => {
+        // Convert to consistent MySQL datetime format without timezone issues
+        let startDate, endDate;
+        
+        if (blocked.start_datetime instanceof Date) {
+          startDate = toMySQLDateTime(blocked.start_datetime).replace(' ', 'T');
+        } else {
+          // Convert MySQL datetime format to ISO format without Z suffix
+          startDate = typeof blocked.start_datetime === 'string' ? 
+            blocked.start_datetime.replace(' ', 'T').replace('Z', '') : blocked.start_datetime;
+        }
+        
+        if (blocked.end_datetime instanceof Date) {
+          endDate = toMySQLDateTime(blocked.end_datetime).replace(' ', 'T');
+        } else {
+          // Convert MySQL datetime format to ISO format without Z suffix
+          endDate = typeof blocked.end_datetime === 'string' ? 
+            blocked.end_datetime.replace(' ', 'T').replace('Z', '') : blocked.end_datetime;
+        }
+        
+        return {
+          id: blocked.id,
+          type: 'blocked',
+          start_datetime: startDate.replace('T', ' '),
+          end_datetime: endDate.replace('T', ' '),
+          reason: blocked.reason || 'Blocked'
+        };
+      });
+      
+      res.status(200).json({
+        status: 'success',
+        results: formattedBlockedDates.length,
+        data: formattedBlockedDates
+      });
+    } catch (error) {
+      console.error('Error getting public blocked dates:', error);
+      next(serverError('Failed to get blocked dates'));
+    }
+  },
+
+  /**
+   * Get availability mode for a listing for public users
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getPublicAvailabilityMode(req, res, next) {
+    try {
+      const { id } = req.params;
+      
+      // Check if listing exists
+      const [listing] = await db.query(
+        'SELECT * FROM listings WHERE id = ? AND active = 1',
+        [id]
+      );
+      
+      if (!listing) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Listing not found or not active'
+        });
+      }
+      
+      // Get availability mode
+      const [availabilitySettings] = await db.query(
+        'SELECT availability_mode FROM listing_settings WHERE listing_id = ?',
+        [id]
+      );
+      
+      const mode = availabilitySettings?.availability_mode || 'available-by-default';
+      
+      res.status(200).json({
+        status: 'success',
+        data: {
+          mode
+        }
+      });
+    } catch (error) {
+      console.error('Error getting availability mode:', error);
+      next(serverError('Failed to get availability mode'));
     }
   },
 

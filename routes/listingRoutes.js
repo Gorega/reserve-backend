@@ -233,6 +233,57 @@ router.post(
 );
 
 /**
+ * @route   GET /api/listings/:id/available-slots
+ * @desc    Get available time slots for a listing (using same logic as host calendar)
+ * @access  Public
+ * @query   start_date (required), end_date (required) - Dates in YYYY-MM-DD format
+ */
+router.get(
+  '/:id/available-slots',
+  idParamValidation,
+  validate,
+  listingController.getPublicAvailableSlots
+);
+
+/**
+ * @route   GET /api/listings/:id/reservations
+ * @desc    Get reservations for a listing (for calendar display)
+ * @access  Public
+ * @query   start_date (optional), end_date (optional) - Dates in YYYY-MM-DD format
+ */
+router.get(
+  '/:id/reservations',
+  idParamValidation,
+  validate,
+  listingController.getPublicReservations
+);
+
+/**
+ * @route   GET /api/listings/:id/blocked-dates
+ * @desc    Get blocked dates for a listing
+ * @access  Public
+ * @query   start_date (optional), end_date (optional) - Dates in YYYY-MM-DD format
+ */
+router.get(
+  '/:id/blocked-dates',
+  idParamValidation,
+  validate,
+  listingController.getPublicBlockedDates
+);
+
+/**
+ * @route   GET /api/listings/:id/availability-mode
+ * @desc    Get availability mode for a listing
+ * @access  Public
+ */
+router.get(
+  '/:id/availability-mode',
+  idParamValidation,
+  validate,
+  listingController.getPublicAvailabilityMode
+);
+
+/**
  * @route   POST /api/listings/:id/calculate-pricing
  * @desc    Calculate smart pricing for a listing
  * @access  Public

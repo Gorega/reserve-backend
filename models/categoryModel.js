@@ -237,7 +237,7 @@ const categoryModel = {
           query += `
             AND l.id NOT IN (
               SELECT DISTINCT listing_id FROM bookings 
-              WHERE status IN ('pending', 'confirmed') 
+              WHERE status IN ('pending', 'confirmed', 'completed') 
               AND (
                 (start_datetime <= ? AND end_datetime >= ?) OR
                 (start_datetime <= ? AND end_datetime >= ?) OR
@@ -307,4 +307,4 @@ const categoryModel = {
   }
 };
 
-module.exports = categoryModel; 
+module.exports = categoryModel;
