@@ -17,7 +17,11 @@ const userModel = {
    */
   async getAll(filters = {}, page = 1, limit = 10) {
     try {
-      const offset = (page - 1) * limit;
+      // Ensure page and limit are numbers
+      const pageNum = parseInt(page, 10) || 1;
+      const limitNum = parseInt(limit, 10) || 10;
+      const offset = (pageNum - 1) * limitNum;
+      
       let query = 'SELECT id, name, email, phone, profile_image, is_provider, created_at FROM users';
       const params = [];
       
@@ -42,7 +46,7 @@ const userModel = {
         
         if (filters.is_provider !== undefined) {
           filterConditions.push('is_provider = ?');
-          params.push(filters.is_provider);
+          params.push(filters.is_provider ? 1 : 0); // Convert boolean to 0/1 for MySQL
         }
         
         if (filterConditions.length > 0) {
@@ -50,9 +54,12 @@ const userModel = {
         }
       }
       
-      // Add pagination
-      query += ' LIMIT ? OFFSET ?';
-      params.push(limit, offset);
+      // Add pagination with direct integer values in the query string instead of parameters
+      query += ` LIMIT ${parseInt(limitNum, 10)} OFFSET ${parseInt(offset, 10)}`;
+      
+      // Debug log to check query
+      console.log('Query:', query);
+      console.log('Parameters:', params, 'Types:', params.map(p => typeof p));
       
       const users = await db.query(query, params);
       return users;

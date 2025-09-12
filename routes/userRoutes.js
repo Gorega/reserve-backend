@@ -67,6 +67,32 @@ router.put(
 );
 
 /**
+ * @route   POST /api/users/profile
+ * @desc    Update current user profile (alternative for clients using POST)
+ * @access  Private
+ */
+router.post(
+  '/profile',
+  protect,
+  uploadSingle('profile_image'),
+  userValidationRules.update,
+  validate,
+  userController.updateProfile
+);
+
+/**
+ * @route   POST /api/users/profile/image
+ * @desc    Upload user profile image
+ * @access  Private
+ */
+router.post(
+  '/profile/image',
+  protect,
+  uploadSingle('profile_image'),
+  userController.updateProfileImage
+);
+
+/**
  * @route   POST /api/users/become-host
  * @desc    Update user to become a host/provider
  * @access  Private

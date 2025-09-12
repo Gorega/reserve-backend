@@ -43,7 +43,7 @@ const userValidationRules = {
       .isLength({ min: 6 })
       .withMessage('Password must be at least 6 characters long'),
     body('is_provider').optional().isBoolean().withMessage('Provider status must be boolean'),
-    body('profile_image').optional().isURL().withMessage('Profile image must be a valid URL')
+    body('profile_image').optional()
   ],
 
   // Login validation rules
@@ -77,7 +77,7 @@ const userValidationRules = {
       .isLength({ min: 6 })
       .withMessage('Password must be at least 6 characters long'),
     body('is_provider').optional().isBoolean().withMessage('Provider status must be boolean'),
-    body('profile_image').optional().isURL().withMessage('Profile image must be a valid URL')
+    body('profile_image').optional()
   ]
 };
 
@@ -92,7 +92,7 @@ const listingValidationRules = {
     body('price_per_hour').optional(),
     body('price_per_day').optional(),
     body('price_per_half_night').optional(),
-    body('unit_type').optional().isIn(['hour', 'day', 'session', 'night']).withMessage('Invalid unit type'),
+    body('unit_type').optional().isIn(['hour', 'day', 'appointment', 'night']).withMessage('Invalid unit type'),
     body('is_hourly').optional().isBoolean().withMessage('Is hourly must be a boolean value'),
     body('location').trim().notEmpty().withMessage('Location is required'),
     body('latitude').isFloat({ min: -90, max: 90 }).withMessage('Latitude must be between -90 and 90'),
@@ -255,7 +255,7 @@ const listingValidationRules = {
     body('price_per_hour').optional(),
     body('price_per_day').optional(),
     body('price_per_half_night').optional(),
-    body('unit_type').optional().isIn(['hour', 'day', 'session', 'night']).withMessage('Invalid unit type'),
+    body('unit_type').optional().isIn(['hour', 'day', 'appointment', 'night']).withMessage('Invalid unit type'),
     body('is_hourly').optional().isBoolean().withMessage('Is hourly must be a boolean value'),
     body('location').optional().trim().notEmpty().withMessage('Location cannot be empty'),
     body('latitude').optional().isFloat({ min: -90, max: 90 }).withMessage('Latitude must be between -90 and 90'),
@@ -422,7 +422,7 @@ const bookingValidationRules = {
     body('listing_id').isInt().withMessage('Listing ID must be an integer'),
     body('start_datetime').isISO8601().withMessage('Start date must be a valid date'),
     body('end_datetime').isISO8601().withMessage('End date must be a valid date'),
-    body('booking_type').isIn(['hourly', 'daily']).withMessage('Booking type must be either hourly or daily'),
+    body('booking_type').isIn(['hourly', 'daily', 'appointment', 'night']).withMessage('Booking type must be either hourly or daily'),
     body('guests_count').optional().isInt({ min: 1 }).withMessage('Guests count must be at least 1'),
     body('notes').optional().trim()
   ],

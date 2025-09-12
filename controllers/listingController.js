@@ -262,6 +262,7 @@ const listingController = {
         const hourOption = listingData.pricing_options.find(p => p.unit_type === 'hour');
         const dayOption = listingData.pricing_options.find(p => p.unit_type === 'day');
         const nightOption = listingData.pricing_options.find(p => p.unit_type === 'night');
+        const appointmentOption = listingData.pricing_options.find(p => p.unit_type === 'appointment');
         
         if (hourOption) listingData.price_per_hour = parseFloat(hourOption.price);
         if (dayOption) listingData.price_per_day = parseFloat(dayOption.price);
@@ -272,6 +273,17 @@ const listingController = {
           const defaultOption = listingData.pricing_options.find(p => p.is_default);
           listingData.unit_type = defaultOption ? defaultOption.unit_type : 
             listingData.pricing_options[0].unit_type;
+        }
+        
+        // Set booking_type based on unit_type
+        if (listingData.unit_type === 'hour') {
+          listingData.booking_type = 'hourly';
+        } else if (listingData.unit_type === 'day') {
+          listingData.booking_type = 'daily';
+        } else if (listingData.unit_type === 'night') {
+          listingData.booking_type = 'night';
+        } else if (listingData.unit_type === 'appointment') {
+          listingData.booking_type = 'appointment';
         }
       } 
       // Create pricing options from legacy fields if not provided
@@ -309,6 +321,31 @@ const listingController = {
         if (!listingData.unit_type && listingData.pricing_options.length > 0) {
           listingData.unit_type = listingData.pricing_options[0].unit_type;
         }
+        
+        // Set booking_type based on unit_type
+        if (listingData.unit_type === 'hour') {
+          listingData.booking_type = 'hourly';
+          // Handle slot_duration for hourly listings
+          if (listingData.slot_duration) {
+            listingData.slot_duration = parseInt(listingData.slot_duration);
+          } else {
+            // Default to 60 minutes for hourly listings
+            listingData.slot_duration = 60;
+          }
+        } else if (listingData.unit_type === 'day') {
+          listingData.booking_type = 'daily';
+        } else if (listingData.unit_type === 'night') {
+          listingData.booking_type = 'night';
+        } else if (listingData.unit_type === 'appointment') {
+          listingData.booking_type = 'appointment';
+          // Handle slot_duration for appointment listings
+          if (listingData.slot_duration) {
+            listingData.slot_duration = parseInt(listingData.slot_duration);
+          } else {
+            // Default to 30 minutes for appointment listings
+            listingData.slot_duration = 30;
+          }
+        }
       } else {
         return next(badRequest('At least one pricing option is required'));
       }
@@ -326,6 +363,21 @@ const listingController = {
       } else {
         // Set default cancellation policy if not provided
         listingData.cancellation_policy = 'moderate';
+      }
+      
+      // Handle slot_duration - ensure it's properly parsed as an integer
+      if (listingData.slot_duration) {
+        listingData.slot_duration = parseInt(listingData.slot_duration);
+      } else if (listingData.unit_type === 'hour') {
+        // For hourly listings, set slot_duration from the default pricing option's duration
+        const defaultOption = listingData.pricing_options.find(p => p.is_default && p.unit_type === 'hour');
+        if (defaultOption) {
+          // Convert duration to minutes (assuming duration is in hours for hourly listings)
+          listingData.slot_duration = defaultOption.duration * 60;
+        } else {
+          // Default to 60 minutes if no default hourly option
+          listingData.slot_duration = 60;
+        }
       }
       
       // Handle photos if files are uploaded
@@ -514,6 +566,7 @@ const listingController = {
         const hourOption = listingData.pricing_options.find(p => p.unit_type === 'hour');
         const dayOption = listingData.pricing_options.find(p => p.unit_type === 'day');
         const nightOption = listingData.pricing_options.find(p => p.unit_type === 'night');
+        const appointmentOption = listingData.pricing_options.find(p => p.unit_type === 'appointment');
         
         if (hourOption) listingData.price_per_hour = parseFloat(hourOption.price);
         if (dayOption) listingData.price_per_day = parseFloat(dayOption.price);
@@ -524,6 +577,42 @@ const listingController = {
           const defaultOption = listingData.pricing_options.find(p => p.is_default);
           listingData.unit_type = defaultOption ? defaultOption.unit_type : 
             listingData.pricing_options[0].unit_type;
+        }
+        
+        // Set booking_type based on unit_type
+        if (listingData.unit_type === 'hour') {
+          listingData.booking_type = 'hourly';
+        } else if (listingData.unit_type === 'day') {
+          listingData.booking_type = 'daily';
+        } else if (listingData.unit_type === 'night') {
+          listingData.booking_type = 'night';
+        } else if (listingData.unit_type === 'appointment') {
+          listingData.booking_type = 'appointment';
+        }
+        
+        // Handle slot_duration - ensure it's properly parsed as an integer
+        if (listingData.slot_duration) {
+          listingData.slot_duration = parseInt(listingData.slot_duration);
+        } else if (listingData.unit_type === 'hour') {
+          // For hourly listings, set slot_duration from the default pricing option's duration
+          const defaultOption = listingData.pricing_options.find(p => p.is_default && p.unit_type === 'hour');
+          if (defaultOption) {
+            // Convert duration to minutes (assuming duration is in hours for hourly listings)
+            listingData.slot_duration = defaultOption.duration * 60;
+          } else {
+            // Default to 60 minutes if no default hourly option
+            listingData.slot_duration = 60;
+          }
+        } else if (listingData.unit_type === 'appointment') {
+          // For appointment listings, set slot_duration
+          const defaultOption = listingData.pricing_options.find(p => p.is_default && p.unit_type === 'appointment');
+          if (defaultOption) {
+            // Use the duration from the default option (in minutes)
+            listingData.slot_duration = defaultOption.duration * 60;
+          } else {
+            // Default to 30 minutes if no default appointment option
+            listingData.slot_duration = 30;
+          }
         }
       } 
       // Create pricing options from legacy fields if provided but no pricing_options
@@ -560,6 +649,31 @@ const listingController = {
         // Set default unit_type if not provided
         if (!listingData.unit_type && listingData.pricing_options.length > 0) {
           listingData.unit_type = listingData.pricing_options[0].unit_type;
+        }
+        
+        // Set booking_type based on unit_type
+        if (listingData.unit_type === 'hour') {
+          listingData.booking_type = 'hourly';
+          // Handle slot_duration for hourly listings
+          if (listingData.slot_duration) {
+            listingData.slot_duration = parseInt(listingData.slot_duration);
+          } else {
+            // Default to 60 minutes for hourly listings
+            listingData.slot_duration = 60;
+          }
+        } else if (listingData.unit_type === 'day') {
+          listingData.booking_type = 'daily';
+        } else if (listingData.unit_type === 'night') {
+          listingData.booking_type = 'night';
+        } else if (listingData.unit_type === 'appointment') {
+          listingData.booking_type = 'appointment';
+          // Handle slot_duration for appointment listings
+          if (listingData.slot_duration) {
+            listingData.slot_duration = parseInt(listingData.slot_duration);
+          } else {
+            // Default to 30 minutes for appointment listings
+            listingData.slot_duration = 30;
+          }
         }
       }
       
@@ -1622,6 +1736,131 @@ const listingController = {
     } catch (error) {
       console.error('Error getting public available slots:', error);
       next(serverError('Failed to get available slots'));
+    }
+  },
+
+  /**
+   * Get appointment slots for a listing on a specific date
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getAppointmentSlots(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { date } = req.query;
+      
+      // Validate required parameters
+      if (!date) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'date parameter is required'
+        });
+      }
+      
+      // Validate date format (YYYY-MM-DD)
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(date)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Date must be in YYYY-MM-DD format'
+        });
+      }
+      
+      // Check if listing exists and is appointment-based
+      const [listing] = await db.query(
+        'SELECT * FROM listings WHERE id = ? AND active = 1 AND booking_type = ?',
+        [id, 'appointment']
+      );
+      
+      if (!listing) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Appointment-based listing not found or not active'
+        });
+      }
+      
+      // Get day of week from date
+      const selectedDate = new Date(date + 'T12:00:00');
+      const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      const dayOfWeek = dayNames[selectedDate.getDay()];
+      
+      // Get appointment slots for this day of week
+      const appointmentSlots = await db.query(`
+        SELECT 
+          a.id,
+          a.start_time,
+          a.end_time,
+          a.max_bookings,
+          a.slot_duration,
+          a.buffer_before,
+          a.buffer_after,
+          COALESCE(COUNT(b.id), 0) as current_bookings
+        FROM appointment_slots a
+        LEFT JOIN bookings b ON (
+          b.listing_id = a.listing_id 
+          AND DATE(b.start_datetime) = ?
+          AND TIME(b.start_datetime) = a.start_time
+          AND b.status IN ('pending', 'confirmed')
+        )
+        WHERE a.listing_id = ?
+        AND a.day_of_week = ?
+        AND a.is_available = TRUE
+        AND (a.start_date IS NULL OR a.start_date <= ?)
+        AND (a.end_date IS NULL OR a.end_date >= ?)
+        GROUP BY a.id
+        HAVING current_bookings < a.max_bookings
+        ORDER BY a.start_time ASC
+      `, [date, id, dayOfWeek, date, date]);
+      
+      // Get host availability for this listing and date
+      const hostAvailability = await db.query(`
+        SELECT 
+          h.host_id,
+          u.name as host_name,
+          h.max_concurrent_appointments,
+          COALESCE(COUNT(b.id), 0) as current_queue_count
+        FROM host_availability h
+        JOIN users u ON u.id = h.host_id
+        LEFT JOIN bookings b ON (
+          b.host_id = h.host_id 
+          AND b.listing_id = h.listing_id
+          AND DATE(b.start_datetime) = ?
+          AND b.status IN ('pending', 'confirmed')
+        )
+        WHERE h.listing_id = ?
+        AND h.date = ?
+        AND h.is_available = TRUE
+        GROUP BY h.host_id, h.max_concurrent_appointments
+        ORDER BY current_queue_count ASC, u.name ASC
+      `, [date, id, date]);
+      
+      // Format the response with available slots and hosts
+      const formattedSlots = appointmentSlots.map(slot => ({
+        id: slot.id,
+        start_time: slot.start_time,
+        end_time: slot.end_time,
+        slot_duration: slot.slot_duration,
+        available_spots: slot.max_bookings - slot.current_bookings,
+        max_bookings: slot.max_bookings,
+        hosts: hostAvailability.map(host => ({
+          host_id: host.host_id,
+          host_name: host.host_name,
+          max_concurrent_appointments: host.max_concurrent_appointments,
+          current_queue_count: host.current_queue_count,
+          available_spots: Math.max(0, host.max_concurrent_appointments - host.current_queue_count)
+        }))
+      }));
+      
+      res.status(200).json({
+        status: 'success',
+        results: formattedSlots.length,
+        data: formattedSlots
+      });
+      
+    } catch (error) {
+      console.error('Error getting appointment slots:', error);
+      next(serverError('Failed to get appointment slots'));
     }
   },
 

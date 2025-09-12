@@ -33,7 +33,6 @@ const bookingController = {
         return next(badRequest('User authentication required'));
       }
       
-      
       // FIXED: Users can be both providers AND customers
       // Show bookings where they are either the customer OR the provider
       if (req.user.is_provider) {
@@ -43,20 +42,9 @@ const bookingController = {
         // For regular users, only show their bookings as customers
         filters.user_id = req.user.id;
       }
-            
-      // TEMPORARY: Test without user filtering to see if data is returned
-      const testFilters = { ...filters };
-      delete testFilters.user_id;
-      delete testFilters.provider_id;
       
-      // Get bookings
+      // Get bookings from the model
       const bookings = await bookingModel.getAll(filters, page, limit);
-      
-      // Add unit_type to each booking for frontend compatibility
-      bookings.forEach(booking => {
-        // Make sure unit_type is always available
-        booking.unit_type = booking.listing_unit_type || 'hour';
-      });
       
       // Build count query - use the same structure as in the model
       let countQuery = `
@@ -120,7 +108,7 @@ const bookingController = {
       
       // Execute count query
       const countResult = await db.query(countQuery, countParams);
-      const totalCount = countResult[0].total;
+      const totalCount = countResult && countResult[0] ? countResult[0].total : 0;
       
       res.status(200).json({
         status: 'success',
@@ -187,6 +175,15 @@ const bookingController = {
       if (listing.user_id === req.user.id) {
         return next(badRequest('You cannot book your own listing'));
       }
+
+      // For appointment bookings, automatically set host_id from the listing if not provided
+      if (bookingData.booking_type === 'appointment') {
+        if (!bookingData.host_id) {
+          // Use the listing's user_id as the host_id
+          bookingData.host_id = listing.user_id;
+          console.log(`Auto-setting host_id to ${listing.user_id} for appointment booking`);
+        }
+      }
       
       const booking = await bookingModel.create(bookingData);
       
@@ -207,53 +204,8 @@ const bookingController = {
    */
   async update(req, res, next) {
     try {
-      const { id } = req.params;
-      const bookingData = req.body;
-      
-      // Get booking to check permissions
-      const booking = await bookingModel.getById(id);
-      
-      // Check if user has permission to update this booking
-      if (
-        booking.user_id !== req.user.id &&
-        booking.provider_id !== req.user.id &&
-        !req.user.is_admin
-      ) {
-        return next(badRequest('You do not have permission to update this booking'));
-      }
-      
-      // Restrict what users can update
-      if (req.user.id === booking.user_id && !req.user.is_admin) {
-        // Regular users can only update notes
-        const allowedFields = ['notes'];
-        Object.keys(bookingData).forEach(key => {
-          if (!allowedFields.includes(key)) {
-            delete bookingData[key];
-          }
-        });
-      }
-      
-      // Providers can update status but not payment status
-      if (req.user.id === booking.provider_id && !req.user.is_admin) {
-        const allowedFields = ['status', 'notes'];
-        Object.keys(bookingData).forEach(key => {
-          if (!allowedFields.includes(key)) {
-            delete bookingData[key];
-          }
-        });
-        
-        // Providers can only set status to confirmed or cancelled
-        if (bookingData.status && !['confirmed', 'cancelled'].includes(bookingData.status)) {
-          return next(badRequest('Invalid status value'));
-        }
-      }
-      
-      const updatedBooking = await bookingModel.update(id, bookingData);
-      
-      res.status(200).json({
-        status: 'success',
-        data: updatedBooking
-      });
+      // Simply pass the request to the model's updateBooking method
+      await bookingModel.updateBooking(req, res, next);
     } catch (error) {
       next(error);
     }
@@ -284,6 +236,7 @@ const bookingController = {
       // Determine who cancelled
       const cancelledBy = booking.user_id === req.user.id ? 'user' : 'provider';
       
+      // Use the model method directly instead of the controller method to avoid circular reference
       const cancelledBooking = await bookingModel.cancel(id, cancelledBy);
       
       res.status(200).json({

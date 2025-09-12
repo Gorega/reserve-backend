@@ -247,23 +247,22 @@ const categoryModel = {
           `;
           params.push(formattedEndDate, formattedStartDate, formattedStartDate, formattedEndDate, formattedStartDate, formattedEndDate);
           
-          // Handle listings with blocked-by-default availability mode
+          // Handle listings with blocked-by-default availability mode - USING AVAILABLE_SLOTS TABLE
           query += `
             AND NOT EXISTS (
               SELECT 1 FROM listing_settings 
               WHERE listing_id = l.id 
               AND availability_mode = 'blocked-by-default'
               AND NOT EXISTS (
-                SELECT 1 FROM availability 
+                SELECT 1 FROM available_slots 
                 WHERE listing_id = l.id 
                 AND is_available = 1
-                AND date BETWEEN DATE(?) AND DATE(?)
-                GROUP BY date
-                HAVING COUNT(*) = DATEDIFF(DATE(?), DATE(?)) + 1
+                AND start_datetime <= ? 
+                AND end_datetime >= ?
               )
             )
           `;
-          params.push(formattedStartDate, formattedEndDate, formattedEndDate, formattedStartDate);
+          params.push(formattedEndDate, formattedStartDate);
         }
       }
       

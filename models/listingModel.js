@@ -224,23 +224,22 @@ const listingModel = {
             `);
             params.push(formattedEndDate, formattedStartDate, formattedStartDate, formattedEndDate, formattedStartDate, formattedEndDate);
             
-            // Handle listings with blocked-by-default availability mode
+            // Handle listings with blocked-by-default availability mode - USING AVAILABLE_SLOTS TABLE
             filterConditions.push(`
               NOT EXISTS (
                 SELECT 1 FROM listing_settings 
                 WHERE listing_id = l.id 
                 AND availability_mode = 'blocked-by-default'
                 AND NOT EXISTS (
-                  SELECT 1 FROM availability 
+                  SELECT 1 FROM available_slots 
                   WHERE listing_id = l.id 
                   AND is_available = 1
-                  AND date BETWEEN DATE(?) AND DATE(?)
-                  GROUP BY date
-                  HAVING COUNT(*) = DATEDIFF(DATE(?), DATE(?)) + 1
+                  AND start_datetime <= ? 
+                  AND end_datetime >= ?
                 )
               )
             `);
-            params.push(formattedStartDate, formattedEndDate, formattedEndDate, formattedStartDate);
+            params.push(formattedEndDate, formattedStartDate);
           }
         }
         
@@ -594,12 +593,32 @@ const listingModel = {
       await connection.beginTransaction();
       
       try {
+        // Determine booking_type based on unit_type
+        let booking_type = 'hourly'; // Default
+        if (unit_type === 'hour') {
+          booking_type = 'hourly';
+        } else if (unit_type === 'day') {
+          booking_type = 'daily';
+        } else if (unit_type === 'night') {
+          booking_type = 'night';
+        } else if (unit_type === 'appointment') {
+          booking_type = 'appointment';
+        }
+        
+        // Determine slot_duration based on unit_type
+        let slot_duration = null;
+        if (unit_type === 'hour') {
+          slot_duration = listingData.slot_duration ? parseInt(listingData.slot_duration, 10) : 60;
+        } else if (unit_type === 'appointment') {
+          slot_duration = listingData.slot_duration ? parseInt(listingData.slot_duration, 10) : 30;
+        }
+        
         // Insert listing
         const listingResult = await connection.query(
           `INSERT INTO listings (
             user_id, category_id, listing_type, title, description, price_per_hour, price_per_day, price_per_half_night,
-            unit_type, is_hourly, location, latitude, longitude, instant_booking, cancellation_policy
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            unit_type, is_hourly, location, latitude, longitude, instant_booking, cancellation_policy, slot_duration, booking_type
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             user_id,
             category_id,
@@ -610,12 +629,14 @@ const listingModel = {
             price_per_day || null,
             price_per_half_night || null,
             unit_type || 'hour',
-            unit_type === 'hour' || unit_type === 'session' ? 1 : 0,
+            unit_type === 'hour' || unit_type === 'session' || unit_type === 'appointment' ? 1 : 0,
             location,
             latitude,
             longitude,
             instant_booking ? 1 : 0,
-            cancellation_policy || 'moderate'
+            cancellation_policy || 'moderate',
+            slot_duration,
+            booking_type
           ]
         );
         
@@ -992,6 +1013,30 @@ const listingModel = {
             mainListingData[key] = listingData[key];
           }
         });
+        
+        // Set booking_type based on unit_type if unit_type is provided
+        if (listingData.unit_type) {
+          if (listingData.unit_type === 'hour') {
+            mainListingData.booking_type = 'hourly';
+          } else if (listingData.unit_type === 'day') {
+            mainListingData.booking_type = 'daily';
+          } else if (listingData.unit_type === 'night') {
+            mainListingData.booking_type = 'night';
+          } else if (listingData.unit_type === 'appointment') {
+            mainListingData.booking_type = 'appointment';
+          }
+        }
+        
+        // Handle slot_duration for hour and appointment unit types
+        if (listingData.unit_type === 'hour' || listingData.unit_type === 'appointment') {
+          if (listingData.slot_duration) {
+            mainListingData.slot_duration = parseInt(listingData.slot_duration, 10);
+          } else if (listingData.unit_type === 'hour') {
+            mainListingData.slot_duration = 60; // Default for hourly
+          } else if (listingData.unit_type === 'appointment') {
+            mainListingData.slot_duration = 30; // Default for appointment
+          }
+        }
         
         // Process property-specific fields
         if (listingData.property_type) property_details.property_type = listingData.property_type;
@@ -1583,12 +1628,10 @@ const listingModel = {
       
       const availabilityMode = listingSettings?.availability_mode || 'available-by-default';
       
-      // CRITICAL FIX: For day/night listings with booking_period, use slot-based availability checking
-      if (bookingPeriod && ['morning', 'day', 'night'].includes(bookingPeriod) && 
-          (listing.unit_type === 'day' || listing.unit_type === 'night')) {
-        
+      // CRITICAL FIX: For day/night/appointment listings, use slot-based availability checking
+      if (listing.unit_type === 'day' || listing.unit_type === 'night' || listing.unit_type === 'appointment') {
         // Get available slots for the date range using the same logic as frontend
-        const { getPublicAvailableSlots } = require('../controllers/listingController');
+        const { getPublicAvailableSlots } = require('../controllers/hostController');
         
         // Convert MySQL datetime format to ISO format for Date constructor
         const mysqlToIso = (mysqlDatetime) => {
@@ -1599,12 +1642,10 @@ const listingModel = {
           return mysqlDatetime.replace(' ', 'T') + 'Z';
         };
         
-        
         let startDate, endDate;
         try {
           const startIso = mysqlToIso(formattedStartDatetime);
           const endIso = mysqlToIso(formattedEndDatetime);
-          
           
           const startDateObj = new Date(startIso);
           const endDateObj = new Date(endIso);
@@ -1630,42 +1671,61 @@ const listingModel = {
         try {
           const availableSlots = await getPublicAvailableSlots(listingId, startDate, endDate);
           
+          if (availableSlots.length === 0) {
+            return false;
+          }
           
-          // Check if any slot matches the requested booking period and covers the time range
-          const hasMatchingSlot = availableSlots.some(slot => {
-            const slotStart = new Date(slot.start_datetime);
-            const slotEnd = new Date(slot.end_datetime);
-            const requestStart = new Date(formattedStartDatetime);
-            const requestEnd = new Date(formattedEndDatetime);
+          // For day/night listings with booking_period, check if any slot matches the requested period
+          if (bookingPeriod && ['morning', 'day', 'night'].includes(bookingPeriod)) {
+            // Check if any slot matches the requested booking period
+            const hasMatchingSlot = availableSlots.some(slot => {
+              const slotStart = new Date(slot.start_datetime);
+              const slotEnd = new Date(slot.end_datetime);
+              const requestStart = new Date(formattedStartDatetime);
+              const requestEnd = new Date(formattedEndDatetime);
+              
+              // Slot must cover the entire requested period
+              const coversTimeRange = slotStart <= requestStart && slotEnd >= requestEnd;
+              
+              // For booking_period matching, check unit_type
+              let periodMatches = false;
+              if (bookingPeriod === 'morning' || bookingPeriod === 'day') {
+                // Check unit_type for day bookings
+                periodMatches = slot.unit_type === 'day' || listing.unit_type === 'day';
+              } else if (bookingPeriod === 'night') {
+                // Check unit_type for night bookings
+                periodMatches = slot.unit_type === 'night' || listing.unit_type === 'night';
+              }
+              
+              const isMatch = coversTimeRange && periodMatches;
+              return isMatch;
+            });
             
-            // Slot must cover the entire requested period
-            const coversTimeRange = slotStart <= requestStart && slotEnd >= requestEnd;
+            return hasMatchingSlot;
+          } else {
+            // For appointment or when no booking_period specified, just check if there are any available slots
+            // that cover the requested time range
+            const hasAvailableSlot = availableSlots.some(slot => {
+              const slotStart = new Date(slot.start_datetime);
+              const slotEnd = new Date(slot.end_datetime);
+              const requestStart = new Date(formattedStartDatetime);
+              const requestEnd = new Date(formattedEndDatetime);
+              
+              // Slot must cover the entire requested period
+              const coversTimeRange = slotStart <= requestStart && slotEnd >= requestEnd;
+              return coversTimeRange;
+            });
             
-            // For booking_period matching, check unit_type (slot_type is always 'regular' now)
-            let periodMatches = false;
-            if (bookingPeriod === 'morning' || bookingPeriod === 'day') {
-              // Check unit_type for day bookings
-              periodMatches = slot.unit_type === 'day';
-            } else if (bookingPeriod === 'night') {
-              // Check unit_type for night bookings
-              periodMatches = slot.unit_type === 'night';
-            }
-            
-            return coversTimeRange && periodMatches;
-          });
-          
-          return hasMatchingSlot;
+            return hasAvailableSlot;
+          }
         } catch (slotError) {
-          console.error('Error checking slot availability for booking period:', slotError);
+          console.error('Error checking slot availability:', slotError);
           // Fall back to basic availability check below
         }
       }
       
       // CRITICAL FIX: Use the same logic as getPublicAvailableSlots to ensure consistency
-      try {
-        console.log('🔍 DEBUG: Checking available_slots table for listing:', listingId);
-        console.log('🔍 DEBUG: Formatted datetime range:', formattedStartDatetime, 'to', formattedEndDatetime);
-        
+      try {        
         // Get all available slots for this listing that might overlap with our booking period
         const availableSlotsQuery = `
           SELECT start_datetime, end_datetime
@@ -1687,11 +1747,7 @@ const listingModel = {
           formattedStartDatetime, formattedEndDatetime
         ]);
         
-        console.log('🔍 DEBUG: Available slots query result:', availableSlots.length, 'slots found');
-        console.log('🔍 DEBUG: Available slots data:', JSON.stringify(availableSlots, null, 2));
-        
         if (availableSlots.length === 0) {
-          console.log('❌ DEBUG: No available slots found for this time period');
           return false;
         }
         
@@ -1700,15 +1756,10 @@ const listingModel = {
         const bookingStartUTC = new Date(startDatetime); // Original UTC time from frontend
         const bookingEndUTC = new Date(endDatetime); // Original UTC time from frontend
         
-        console.log('🔍 DEBUG: Booking period (formatted local):', formattedStartDatetime, 'to', formattedEndDatetime);
-        console.log('🔍 DEBUG: Booking period (original UTC):', bookingStartUTC.toISOString(), 'to', bookingEndUTC.toISOString());
-        
         for (const slot of availableSlots) {
           const slotStart = new Date(slot.start_datetime);
           const slotEnd = new Date(slot.end_datetime);
-          
-          console.log('🔍 DEBUG: Checking slot:', slotStart.toISOString(), 'to', slotEnd.toISOString());
-          
+                    
           // Check if the slot covers the entire booking period
           // A slot covers a booking if it starts before or at the booking start time
           // AND ends after or at the booking end time
@@ -1716,16 +1767,8 @@ const listingModel = {
           const slotEndAfterBooking = slotEnd >= bookingEndUTC;
           const covers = slotStartBeforeBooking && slotEndAfterBooking;
           
-          console.log('🔍 DEBUG: Slot covers booking?', {
-            slotStartBeforeBooking,
-            slotEndAfterBooking,
-            covers
-          });
-          
           if (covers) {
             // This slot covers the entire booking period, check for booking conflicts
-            console.log('🔍 DEBUG: Found covering slot:', slot.start_datetime, 'to', slot.end_datetime);
-            console.log('🔍 DEBUG: Checking for booking conflicts...');
             // CRITICAL FIX: Use proper overlap detection for booking conflicts
             // Two time periods overlap if: start1 < end2 AND start2 < end1
             // But we need to exclude adjacent bookings (where end1 = start2 or end2 = start1)
@@ -1736,10 +1779,6 @@ const listingModel = {
               AND start_datetime < ? AND end_datetime > ?
             `;
             
-            console.log('🔍 DEBUG: Booking conflict query parameters:');
-            console.log('🔍 DEBUG: listingId:', listingId);
-            console.log('🔍 DEBUG: endDatetime (new booking end):', endDatetime);
-            console.log('🔍 DEBUG: startDatetime (new booking start):', startDatetime);
             
             const allPotentialConflicts = await db.query(bookingsQuery, [
               listingId,
@@ -1747,7 +1786,6 @@ const listingModel = {
               startDatetime
             ]);
             
-            console.log('🔍 DEBUG: Potential conflicts found:', allPotentialConflicts.length);
             
             // Filter out adjacent bookings (not actual conflicts)
             const actualConflicts = allPotentialConflicts.filter(booking => {
@@ -1759,30 +1797,18 @@ const listingModel = {
               // Check for actual overlap (not just adjacency)
               const hasOverlap = bookingStart < newBookingEnd && bookingEnd > newBookingStart;
               
-              console.log(`🔍 DEBUG: Checking booking ${booking.id}:`);
-              console.log(`🔍 DEBUG: - Existing: ${bookingStart.toISOString()} to ${bookingEnd.toISOString()}`);
-              console.log(`🔍 DEBUG: - New: ${newBookingStart.toISOString()} to ${newBookingEnd.toISOString()}`);
-              console.log(`🔍 DEBUG: - Has overlap: ${hasOverlap}`);
-              
               return hasOverlap;
             });
             
             const bookings = actualConflicts;
             
-            console.log('🔍 DEBUG: Booking conflicts found:', bookings.length);
-            console.log('🔍 DEBUG: Conflicting bookings:', JSON.stringify(bookings, null, 2));
             
             if (bookings.length === 0) {
-              console.log('✅ DEBUG: No conflicts found, slot is available!');
               return true;
-            } else {
-              console.log('❌ DEBUG: Conflicts found, slot not available');
             }
           }
         }
-        
-        console.log('❌ DEBUG: No single slot covers the entire booking period');
-        
+                
         // If no single slot covers the period, check for continuous coverage
         const sortedSlots = availableSlots.sort((a, b) => 
           new Date(a.start_datetime) - new Date(b.start_datetime)
@@ -1919,6 +1945,8 @@ const listingModel = {
       throw error;
     }
   },
+
+
   
   /**
    * Add a photo to a listing

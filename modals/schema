@@ -27,7 +27,7 @@ CREATE TABLE listings (
     price_per_hour DECIMAL(10,2),
     price_per_day DECIMAL(10,2),
     price_per_half_night DECIMAL(10,2),
-    unit_type ENUM('hour', 'day', 'night') DEFAULT 'hour',
+    unit_type ENUM('hour', 'day', 'night', 'appointment') DEFAULT 'hour',
     is_hourly BOOLEAN DEFAULT TRUE,
     booking_type ENUM('hourly', 'daily', 'night', 'appointment') DEFAULT 'hourly',
     slot_duration INT, -- in minutes, for cars/appointments if needed
@@ -49,7 +49,7 @@ CREATE TABLE pricing_options (
     id INT AUTO_INCREMENT PRIMARY KEY,
     listing_id INT NOT NULL,
     price DECIMAL(10,2) NOT NULL,
-    unit_type ENUM('hour', 'day', 'night') NOT NULL,
+    unit_type ENUM('hour', 'day', 'night', 'appointment') NOT NULL,
     duration INT NOT NULL DEFAULT 1,
     minimum_units INT NOT NULL DEFAULT 1,
     maximum_units INT NULL,
@@ -126,6 +126,7 @@ CREATE TABLE bookings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     listing_id INT NOT NULL,
     user_id INT NOT NULL,
+    host_id INT NULL, -- For appointment bookings, which host is assigned
     start_datetime DATETIME NOT NULL,
     end_datetime DATETIME NOT NULL,
     booking_type ENUM('hourly', 'daily', 'night', 'appointment') DEFAULT 'hourly',
@@ -147,15 +148,22 @@ CREATE TABLE bookings (
     hold_id INT NULL, -- Reference to reservation hold if this booking was created from a hold
     check_in_time TIME NULL, -- Actual check-in time, can differ from start_datetime
     check_out_time TIME NULL, -- Actual check-out time, can differ from end_datetime
+    ticket_number INT NULL, -- For appointment bookings - queue position
+    ticket_status ENUM('waiting', 'called', 'served', 'no_show') DEFAULT 'waiting', -- Ticket queue status
+    served_at DATETIME NULL, -- When the client was actually served
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (listing_id) REFERENCES listings(id),
     FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (host_id) REFERENCES users(id),
     FOREIGN KEY (pricing_option_id) REFERENCES pricing_options(id),
     FOREIGN KEY (appointment_slot_id) REFERENCES appointment_slots(id),
     INDEX idx_bookings_listing_dates (listing_id, start_datetime, end_datetime),
     INDEX idx_bookings_user (user_id),
-    INDEX idx_bookings_status (status)
+    INDEX idx_bookings_host (host_id),
+    INDEX idx_bookings_status (status),
+    INDEX idx_bookings_ticket (listing_id, host_id, start_datetime, ticket_number),
+    UNIQUE KEY unique_ticket_per_slot (listing_id, host_id, start_datetime, ticket_number)
 );
 
 CREATE TABLE payments (
@@ -468,6 +476,56 @@ CREATE TABLE appointment_slots (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
     INDEX idx_appointment_slots_listing_day (listing_id, day_of_week)
+);
+
+-- Table for host availability across multiple appointment-based listings
+CREATE TABLE host_availability (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    host_id INT NOT NULL,
+    listing_id INT NOT NULL,
+    date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    is_available BOOLEAN DEFAULT TRUE,
+    max_concurrent_appointments INT DEFAULT 1, -- How many appointments can be handled simultaneously
+    notes TEXT NULL,
+    is_recurring BOOLEAN DEFAULT FALSE,
+    day_of_week ENUM('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday') NULL,
+    recurrence_end_date DATE NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (host_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    INDEX idx_host_availability_host_date (host_id, date),
+    INDEX idx_host_availability_listing_date (listing_id, date),
+    INDEX idx_host_availability_host_listing (host_id, listing_id),
+    UNIQUE KEY unique_host_listing_datetime (host_id, listing_id, date, start_time, end_time)
+);
+
+-- Table for tracking appointment queue/tickets
+CREATE TABLE appointment_queue (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    booking_id INT NOT NULL,
+    listing_id INT NOT NULL,
+    host_id INT NOT NULL,
+    slot_datetime DATETIME NOT NULL,
+    ticket_number INT NOT NULL,
+    queue_status ENUM('waiting', 'called', 'in_progress', 'completed', 'no_show', 'cancelled') DEFAULT 'waiting',
+    called_at DATETIME NULL,
+    started_at DATETIME NULL,
+    completed_at DATETIME NULL,
+    estimated_duration INT NULL, -- in minutes
+    actual_duration INT NULL, -- in minutes
+    notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE,
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    FOREIGN KEY (host_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_appointment_queue_slot (listing_id, host_id, slot_datetime),
+    INDEX idx_appointment_queue_ticket (listing_id, host_id, slot_datetime, ticket_number),
+    INDEX idx_appointment_queue_status (queue_status),
+    UNIQUE KEY unique_ticket_per_slot (listing_id, host_id, slot_datetime, ticket_number)
 );
 
 

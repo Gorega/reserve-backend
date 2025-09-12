@@ -246,6 +246,34 @@ router.get(
 );
 
 /**
+ * @route   GET /api/listings/:id/appointment-slots-test
+ * @desc    Test endpoint for appointment slots (no validation)
+ * @access  Public
+ */
+router.get('/:id/appointment-slots-test', (req, res) => {
+  console.log('🧪 Test endpoint accessed:', req.params, req.query);
+  res.json({
+    status: 'success',
+    message: 'Test endpoint working',
+    params: req.params,
+    query: req.query
+  });
+});
+
+/**
+ * @route   GET /api/listings/:id/appointment-slots
+ * @desc    Get appointment slots for a listing on a specific date
+ * @access  Public
+ * @query   date (required) - Date in YYYY-MM-DD format
+ */
+router.get(
+  '/:id/appointment-slots',
+  idParamValidation,
+  validate,
+  listingController.getAppointmentSlots
+);
+
+/**
  * @route   GET /api/listings/:id/reservations
  * @desc    Get reservations for a listing (for calendar display)
  * @access  Public
