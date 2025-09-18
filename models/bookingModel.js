@@ -101,10 +101,33 @@ const bookingModel = {
       // Execute query
       const bookings = await db.query(query, queryParams);
       
-      // Add unit_type to each booking for frontend compatibility
+      // Format datetime fields and add unit_type to each booking
       bookings.forEach(booking => {
         // Make sure unit_type is always available
         booking.unit_type = booking.listing_unit_type || 'hour';
+        
+        // Format datetime fields to YYYY-MM-DD HH:MM:SS
+        if (booking.start_datetime) {
+          booking.start_datetime = this.formatDateTimeForDisplay(booking.start_datetime);
+        }
+        if (booking.end_datetime) {
+          booking.end_datetime = this.formatDateTimeForDisplay(booking.end_datetime);
+        }
+        if (booking.deposit_deadline) {
+          booking.deposit_deadline = this.formatDateTimeForDisplay(booking.deposit_deadline);
+        }
+        if (booking.auto_cancel_at) {
+          booking.auto_cancel_at = this.formatDateTimeForDisplay(booking.auto_cancel_at);
+        }
+        if (booking.created_at) {
+          booking.created_at = this.formatDateTimeForDisplay(booking.created_at);
+        }
+        if (booking.updated_at) {
+          booking.updated_at = this.formatDateTimeForDisplay(booking.updated_at);
+        }
+        if (booking.served_at) {
+          booking.served_at = this.formatDateTimeForDisplay(booking.served_at);
+        }
       });
       
       return bookings;
@@ -154,7 +177,35 @@ const bookingModel = {
         return notFound('Booking not found');
       }
       
-      return bookings[0];
+      const booking = bookings[0];
+      
+      // Format datetime fields to YYYY-MM-DD HH:MM:SS
+      if (booking.start_datetime) {
+        booking.start_datetime = this.formatDateTimeForDisplay(booking.start_datetime);
+      }
+      if (booking.end_datetime) {
+        booking.end_datetime = this.formatDateTimeForDisplay(booking.end_datetime);
+      }
+      if (booking.deposit_deadline) {
+        booking.deposit_deadline = this.formatDateTimeForDisplay(booking.deposit_deadline);
+      }
+      if (booking.auto_cancel_at) {
+        booking.auto_cancel_at = this.formatDateTimeForDisplay(booking.auto_cancel_at);
+      }
+      if (booking.created_at) {
+        booking.created_at = this.formatDateTimeForDisplay(booking.created_at);
+      }
+      if (booking.updated_at) {
+        booking.updated_at = this.formatDateTimeForDisplay(booking.updated_at);
+      }
+      if (booking.served_at) {
+        booking.served_at = this.formatDateTimeForDisplay(booking.served_at);
+      }
+      if (booking.paid_at) {
+        booking.paid_at = this.formatDateTimeForDisplay(booking.paid_at);
+      }
+      
+      return booking;
     } catch (error) {
       console.error('Error getting booking by ID:', error);
       throw error;
@@ -168,7 +219,8 @@ const bookingModel = {
    */
   async create(bookingData) {
     // Extract booking data first to access booking_type and pricing_option_id
-    const { booking_type, pricing_option_id } = bookingData;
+    const { pricing_option_id } = bookingData;
+    let booking_type = bookingData.booking_type;
     
     // For appointment bookings, we need a transaction to ensure atomic ticket assignment
     const connection = booking_type === 'appointment' ? await db.getPool().getConnection() : null;
@@ -181,7 +233,6 @@ const bookingModel = {
         host_id,
         start_datetime,
         end_datetime,
-        booking_type,
         guests_count,
         notes,
         selected_date,
@@ -1138,6 +1189,34 @@ const bookingModel = {
     }
     
     // Format the date to preserve local time (not UTC)
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  },
+  
+  // Helper function to format datetime for display in API responses
+  formatDateTimeForDisplay(datetime) {
+    if (!datetime) return null;
+    
+    // If it's already in the desired format, return it
+    if (typeof datetime === 'string' && datetime.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)) {
+      return datetime;
+    }
+    
+    // Handle ISO format strings or Date objects
+    let date;
+    if (typeof datetime === 'string') {
+      date = new Date(datetime);
+    } else {
+      date = datetime;
+    }
+    
+    // Format as YYYY-MM-DD HH:MM:SS
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');

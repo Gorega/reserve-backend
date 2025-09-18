@@ -1413,112 +1413,12 @@ const hostController = {
   },
 
   /**
-   * Get today's reservations for host
-   * @param {Object} req - Express request object
-   * @param {Object} res - Express response object
-   * @param {Function} next - Express next middleware function
-   */
-  async getTodayReservations(req, res, next) {
-    try {
-      const userId = req.user.id;
-      const today = new Date().toISOString().split('T')[0];
-            
-      const todayReservations = await db.query(`
-        SELECT b.id, b.id as booking_id, b.start_datetime as check_in_date, b.end_datetime as check_out_date, b.status, 
-               b.guests_count as guests, b.total_price, b.created_at,
-               l.id as listing_id, l.title, l.location, 
-               (SELECT image_url FROM listing_photos WHERE listing_id = l.id AND is_cover = 1 LIMIT 1) as primary_image,
-               u.id as guest_id, u.name as guest_name, u.profile_image as guest_profile_image
-        FROM bookings b
-        JOIN listings l ON b.listing_id = l.id
-        JOIN users u ON b.user_id = u.id
-        WHERE l.user_id = ? 
-        AND (
-          (DATE(b.start_datetime) <= ? AND DATE(b.end_datetime) >= ?) OR
-          (DATE(b.start_datetime) = ?)
-        )
-        AND b.status IN ('pending', 'confirmed', 'completed')
-        ORDER BY b.start_datetime ASC
-      `, [userId, today, today, today]);
-            
-      // Format the data for the frontend
-      const formattedReservations = todayReservations.map(booking => ({
-        id: booking.id,
-        booking_id: booking.booking_id,
-        check_in_date: booking.check_in_date,
-        check_out_date: booking.check_out_date,
-        status: booking.status,
-        guests: booking.guests,
-        total_price: booking.total_price,
-        created_at: booking.created_at,
-        listing: {
-          id: booking.listing_id,
-          title: booking.title,
-          location: booking.location,
-          primary_image: booking.primary_image
-        },
-        guest: {
-          id: booking.guest_id,
-          name: booking.guest_name,
-          profile_image: booking.guest_profile_image
         }
-      }));
-      
-      res.status(200).json({
-        status: 'success',
-        results: formattedReservations.length,
-        data: formattedReservations
-      });
-    } catch (error) {
-      console.error('Error getting today reservations:', error);
-      next(errorHandler(error));
-    }
-  },
-  
-  /**
-   * Get upcoming reservations for host
-   * @param {Object} req - Express request object
-   * @param {Object} res - Express response object
-   * @param {Function} next - Express next middleware function
-   */
-  async getUpcomingReservations(req, res, next) {
-    try {
-      const userId = req.user.id;
-      const today = new Date().toISOString().split('T')[0];
-      const thirtyDaysLater = new Date();
-      thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
-      const thirtyDaysLaterStr = thirtyDaysLater.toISOString().split('T')[0];
-            
-      const upcomingReservations = await db.query(`
-        SELECT b.id, b.id as booking_id, b.start_datetime as check_in_date, b.end_datetime as check_out_date, b.status, 
-               b.guests_count as guests, b.total_price, b.created_at,
-               l.id as listing_id, l.title, l.location, 
-               (SELECT image_url FROM listing_photos WHERE listing_id = l.id AND is_cover = 1 LIMIT 1) as primary_image,
-               u.id as guest_id, u.name as guest_name, u.profile_image as guest_profile_image
-        FROM bookings b
-        JOIN listings l ON b.listing_id = l.id
-        JOIN users u ON b.user_id = u.id
-        WHERE l.user_id = ? 
-        AND DATE(b.start_datetime) > ? 
-        AND DATE(b.start_datetime) <= ?
-        AND b.status IN ('pending', 'confirmed', 'completed')
-        ORDER BY b.start_datetime ASC
-      `, [userId, today, thirtyDaysLaterStr]);
-            
-      // Format the data for the frontend
-      const formattedReservations = upcomingReservations.map(booking => ({
-        id: booking.id,
-        booking_id: booking.booking_id,
-        check_in_date: booking.check_in_date,
-        check_out_date: booking.check_out_date,
-        status: booking.status,
-        guests: booking.guests,
-        total_price: booking.total_price,
-        created_at: booking.created_at,
-        listing: {
-          id: booking.listing_id,
-          title: booking.title,
-          location: booking.location,
+      } catch (uploadError) {
+        console.error('Error uploading portfolio image:', uploadError);
+        // Delete the local file if upload failed
+        if (req.file.path && require('fs').existsSync(req.file.path)) {
+          require('fs').unlinkSync(req.file.path);
           primary_image: booking.primary_image
         },
         guest: {
@@ -2965,8 +2865,162 @@ const hostController = {
         message: 'Failed to initialize available slots: ' + error.message
       });
     }
-  }
+  },
 
+  /**
+   * Get today's reservations for host
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getTodayReservations(req, res, next) {
+    try {
+      const userId = req.user.id;
+      const today = new Date().toISOString().split('T')[0];
+            
+      const todayReservations = await db.query(`
+        SELECT b.id, b.id as booking_id, b.start_datetime as check_in_date, b.end_datetime as check_out_date, b.status, 
+               b.guests_count as guests, b.total_price, b.created_at,
+               l.id as listing_id, l.title, l.location, 
+               (SELECT image_url FROM listing_photos WHERE listing_id = l.id AND is_cover = 1 LIMIT 1) as primary_image,
+               u.id as guest_id, u.name as guest_name, u.profile_image as guest_profile_image
+        FROM bookings b
+        JOIN listings l ON b.listing_id = l.id
+        JOIN users u ON b.user_id = u.id
+        WHERE l.user_id = ? 
+        AND (
+          (DATE(b.start_datetime) <= ? AND DATE(b.end_datetime) >= ?) OR
+          (DATE(b.start_datetime) = ?)
+        )
+        AND b.status IN ('pending', 'confirmed', 'completed')
+        ORDER BY b.start_datetime ASC
+      `, [userId, today, today, today]);
+            
+      // Format the data for the frontend
+      const formattedReservations = todayReservations.map(booking => {
+        // Format dates as YYYY-MM-DD HH:MM:SS
+        const formatDateTime = (dateTime) => {
+          if (!dateTime) return null;
+          const date = new Date(dateTime);
+          return date.getFullYear() + '-' + 
+                 String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+                 String(date.getDate()).padStart(2, '0') + ' ' + 
+                 String(date.getHours()).padStart(2, '0') + ':' + 
+                 String(date.getMinutes()).padStart(2, '0') + ':' + 
+                 String(date.getSeconds()).padStart(2, '0');
+        };
+        
+        return {
+          id: booking.id,
+          booking_id: booking.booking_id,
+          check_in_date: formatDateTime(booking.check_in_date),
+          check_out_date: formatDateTime(booking.check_out_date),
+          status: booking.status,
+          guests: booking.guests,
+          total_price: booking.total_price,
+          created_at: booking.created_at,
+          listing: {
+            id: booking.listing_id,
+            title: booking.title,
+            location: booking.location,
+            primary_image: booking.primary_image
+          },
+          guest: {
+            id: booking.guest_id,
+            name: booking.guest_name,
+            profile_image: booking.guest_profile_image
+          }
+        };
+      });
+      
+      res.status(200).json({
+        status: 'success',
+        results: formattedReservations.length,
+        data: formattedReservations
+      });
+    } catch (error) {
+      console.error('Error getting today reservations:', error);
+      next(errorHandler(error));
+    }
+  },
+  
+  /**
+   * Get upcoming reservations for host
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getUpcomingReservations(req, res, next) {
+    try {
+      const userId = req.user.id;
+      const today = new Date().toISOString().split('T')[0];
+      const thirtyDaysLater = new Date();
+      thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
+      const thirtyDaysLaterStr = thirtyDaysLater.toISOString().split('T')[0];
+            
+      const upcomingReservations = await db.query(`
+        SELECT b.id, b.id as booking_id, b.start_datetime as check_in_date, b.end_datetime as check_out_date, b.status, 
+               b.guests_count as guests, b.total_price, b.created_at,
+               l.id as listing_id, l.title, l.location, 
+               (SELECT image_url FROM listing_photos WHERE listing_id = l.id AND is_cover = 1 LIMIT 1) as primary_image,
+               u.id as guest_id, u.name as guest_name, u.profile_image as guest_profile_image
+        FROM bookings b
+        JOIN listings l ON b.listing_id = l.id
+        JOIN users u ON b.user_id = u.id
+        WHERE l.user_id = ? 
+        AND DATE(b.start_datetime) > ? 
+        AND DATE(b.start_datetime) <= ?
+        AND b.status IN ('pending', 'confirmed', 'completed')
+        ORDER BY b.start_datetime ASC
+      `, [userId, today, thirtyDaysLaterStr]);
+            
+      // Format the data for the frontend
+      const formattedReservations = upcomingReservations.map(booking => {
+        // Format dates as YYYY-MM-DD HH:MM:SS
+        const formatDateTime = (dateTime) => {
+          if (!dateTime) return null;
+          const date = new Date(dateTime);
+          return date.getFullYear() + '-' + 
+                 String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+                 String(date.getDate()).padStart(2, '0') + ' ' + 
+                 String(date.getHours()).padStart(2, '0') + ':' + 
+                 String(date.getMinutes()).padStart(2, '0') + ':' + 
+                 String(date.getSeconds()).padStart(2, '0');
+        };
+        
+        return {
+          id: booking.id,
+          booking_id: booking.booking_id,
+          check_in_date: formatDateTime(booking.check_in_date),
+          check_out_date: formatDateTime(booking.check_out_date),
+          status: booking.status,
+          guests: booking.guests,
+          total_price: booking.total_price,
+          created_at: booking.created_at,
+          listing: {
+            id: booking.listing_id,
+            title: booking.title,
+            location: booking.location,
+            primary_image: booking.primary_image
+          },
+          guest: {
+            id: booking.guest_id,
+            name: booking.guest_name,
+            profile_image: booking.guest_profile_image
+          }
+        };
+      });
+      
+      res.status(200).json({
+        status: 'success',
+        results: formattedReservations.length,
+        data: formattedReservations
+      });
+    } catch (error) {
+      console.error('Error getting upcoming reservations:', error);
+      next(errorHandler(error));
+    }
+  },
 };
 
 // Export both the hostController and the utility functions

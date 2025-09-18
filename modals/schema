@@ -539,6 +539,7 @@ INSERT INTO categories (name, translated_name) VALUES
 
 -- Property subcategories (parent_id = 1)
 INSERT INTO categories (name, translated_name, parent_id) VALUES 
+('Villa', '{"ar": "فيلا", "he": "וִילָה"}', 1),
 ('Chalet', '{"ar": "شاليه", "he": "צ׳לט"}', 1),
 ('Apartment', '{"ar": "شقة", "he": "דירה"}', 1),
 ('Room', '{"ar": "غرفة", "he": "חדר"}', 1),
