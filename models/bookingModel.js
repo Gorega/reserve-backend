@@ -538,8 +538,11 @@ const bookingModel = {
       const userServiceFeePercent = 5;
       const userServiceFee = (totalPrice * userServiceFeePercent) / 100;
       
-      // Determine booking status based on instant booking setting
-      const status = listing.instant_booking_enabled ? 'confirmed' : 'pending';
+      // Determine booking status - use provided status or fall back to instant booking setting
+      const status = bookingData.status || (listing.instant_booking_enabled ? 'confirmed' : 'pending');
+      
+      // Determine payment status - use provided payment_status or default to 'unpaid'
+      const payment_status = bookingData.payment_status || 'unpaid';
       
       // Calculate deposit amount (default 20% of total)
       const depositPercent = 20;
@@ -578,7 +581,7 @@ const bookingModel = {
         providerEarnings,
         userServiceFee,
         status,
-        'unpaid',
+        payment_status,
         this.formatDateForMySQL(depositDeadline),
         this.formatDateForMySQL(autoCancelAt),
         notes || null,
@@ -634,6 +637,44 @@ const bookingModel = {
       } catch (syncError) {
         console.error('Error synchronizing available slots after booking creation:', syncError);
         // Don't fail the booking creation if synchronization fails
+      }
+      
+      // Create payment record if payment_method is provided
+      if (bookingData.payment_method) {
+        try {
+          // Calculate confirmation fee (10% of total price)
+          const confirmationFeePercent = 10;
+          const confirmationFee = (totalPrice * confirmationFeePercent) / 100;
+          
+          // Set payment deadline for cash deposits (12 hours from now)
+          let payment_deadline = null;
+          if (bookingData.payment_method === 'cash') {
+            const deadline = new Date();
+            deadline.setHours(deadline.getHours() + 12);
+            payment_deadline = deadline;
+          }
+          
+          // Create payment record
+          const paymentData = {
+            booking_id: bookingId,
+            method: bookingData.payment_method,
+            amount: confirmationFee,
+            deposit_amount: confirmationFee,
+            remaining_amount: totalPrice - confirmationFee,
+            payment_deadline,
+            status: bookingData.payment_method === 'cash' ? 'pending' : 'deposit_paid'
+          };
+          
+          await db.query(
+            'INSERT INTO payments (booking_id, method, amount, deposit_amount, remaining_amount, payment_deadline, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [paymentData.booking_id, paymentData.method, paymentData.amount, paymentData.deposit_amount, paymentData.remaining_amount, paymentData.payment_deadline, paymentData.status]
+          );
+          
+          console.log(`Payment record created for booking ${bookingId} with method: ${bookingData.payment_method}`);
+        } catch (paymentError) {
+          console.error('Error creating payment record:', paymentError);
+          // Don't fail the booking creation if payment record creation fails
+        }
       }
       
       // Return the created booking
