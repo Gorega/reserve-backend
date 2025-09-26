@@ -38,7 +38,9 @@ const bookingModel = {
         FROM bookings b
         JOIN users u ON b.user_id = u.id
         JOIN listings l ON b.listing_id = l.id
-        LEFT JOIN payments p ON b.id = p.booking_id
+        LEFT JOIN payments p ON b.id = p.booking_id AND p.id = (
+          SELECT MAX(id) FROM payments WHERE booking_id = b.id
+        )
       `;
       
       const queryParams = [];
@@ -166,7 +168,9 @@ const bookingModel = {
         FROM bookings b
         JOIN users u ON b.user_id = u.id
         JOIN listings l ON b.listing_id = l.id
-        LEFT JOIN payments p ON b.id = p.booking_id
+        LEFT JOIN payments p ON b.id = p.booking_id AND p.id = (
+          SELECT MAX(id) FROM payments WHERE booking_id = b.id
+        )
         LEFT JOIN payment_locations pl ON p.payment_location_id = pl.id
         WHERE b.id = ?
       `;
