@@ -19,13 +19,13 @@ class EmailService {
     return {
       en: {
         verifyEmail: {
-          subject: 'Verify Your Email Address - Click App',
+          subject: 'Verify Your Email Address - Click',
           title: 'Verify Your Email Address',
           greeting: 'Hello',
-          welcome: 'Welcome to Click App! We\'re excited to have you on board. To complete your registration and start using our platform, please verify your email address by clicking the button below:',
+          welcome: 'Welcome to Click! We\'re excited to have you on board. To complete your registration and start using our platform, please verify your email address by clicking the button below:',
           buttonText: 'Verify Email Address',
           securityNote: '🔒 Security Note:',
-          securityText: 'This verification link will expire in 24 hours for your security. If you didn\'t create an account with Click App, please ignore this email.',
+          securityText: 'This verification link will expire in 24 hours for your security. If you didn\'t create an account with Click, please ignore this email.',
           alternativeText: 'If the button above doesn\'t work, you can copy and paste the following link into your browser:',
           onceVerified: 'Once verified, you\'ll be able to:',
           features: [
@@ -35,31 +35,31 @@ class EmailService {
           ],
           support: 'If you have any questions or need assistance, feel free to contact our support team.',
           regards: 'Best regards,',
-          team: 'The Click App Team',
-          footerText: 'This email was sent to verify your account registration. If you didn\'t sign up for Click App, please ignore this email.',
-          copyright: '© 2025 Click App. All rights reserved.'
+          team: 'The Click Team',
+          footerText: 'This email was sent to verify your account registration. If you didn\'t sign up for Click, please ignore this email.',
+          copyright: '© 2025 Click. All rights reserved.'
         },
         welcome: {
-          subject: '🎉 Welcome to Click App - Account Verified!',
-          title: '🎉 Welcome to Click App!',
+          subject: '🎉 Welcome to Click - Account Verified!',
+          title: '🎉 Welcome to Click!',
           greeting: 'Hello',
-          congratulations: 'Congratulations! Your email has been successfully verified and your Click App account is now active.',
-          enjoy: 'You can now enjoy all the features our platform has to offer. Start exploring and make the most of your Click App experience!',
+          congratulations: 'Congratulations! Your email has been successfully verified and your Click account is now active.',
+          enjoy: 'You can now enjoy all the features our platform has to offer. Start exploring and make the most of your Click experience!',
           buttonText: 'Start Exploring',
           thanks: 'Thank you for joining our community!',
           regards: 'Best regards,',
-          team: 'The Click App Team',
-          copyright: '© 2025 Click App. All rights reserved.'
+          team: 'The Click Team',
+          copyright: '© 2025 Click. All rights reserved.'
         },
         passwordReset: {
-          subject: 'Reset Your Password - Click App',
+          subject: 'Reset Your Password - Click',
           title: 'Reset Your Password',
           greeting: 'Hello',
           message: 'We received a request to reset your password. Click the button below to create a new password:',
           button: 'Reset Password',
           ignore: 'If you didn\'t request this password reset, please ignore this email.',
           regards: 'Best regards,',
-          team: 'The Click App Team',
+          team: 'The Click Team',
           rights: 'All rights reserved.'
         }
       },
@@ -227,7 +227,7 @@ class EmailService {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${t.verifyEmail.title} - Click App</title>
+        <title>${t.verifyEmail.title} - Click</title>
         <style>
             body {
                 font-family: ${isRTL ? "'Segoe UI', 'Tahoma', 'Arial', sans-serif" : "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"};
@@ -318,7 +318,7 @@ class EmailService {
     <body>
         <div class="container">
             <div class="header">
-                <div class="logo">Click App</div>
+                <div class="logo">Click</div>
                 <h1 class="title">${t.verifyEmail.title}</h1>
             </div>
             
@@ -379,7 +379,7 @@ class EmailService {
 
       const mailOptions = {
         from: {
-          name: process.env.EMAIL_FROM_NAME || 'Click App',
+          name: process.env.EMAIL_FROM_NAME || 'Click',
           address: process.env.EMAIL_FROM || process.env.EMAIL_USER
         },
         to: email,
@@ -416,7 +416,7 @@ class EmailService {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${t.welcome.title} - Click App</title>
+        <title>${t.welcome.title} - Click</title>
         <style>
             body {
                 font-family: ${isRTL ? "'Segoe UI', 'Tahoma', 'Arial', sans-serif" : "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"};
@@ -484,7 +484,7 @@ class EmailService {
     <body>
         <div class="container">
             <div class="header">
-                <div class="logo">Click App</div>
+                <div class="logo">Click</div>
                 <h1 class="title">${t.welcome.title}</h1>
             </div>
             
@@ -531,7 +531,7 @@ class EmailService {
 
       const mailOptions = {
         from: {
-          name: process.env.EMAIL_FROM_NAME || 'Click App',
+          name: process.env.EMAIL_FROM_NAME || 'Click',
           address: process.env.EMAIL_FROM || process.env.EMAIL_USER
         },
         to: email,
@@ -629,7 +629,7 @@ class EmailService {
     <body>
         <div class="container">
             <div class="header">
-                <div class="logo">Click App</div>
+                <div class="logo">Click</div>
                 <h1 class="title">${translations.passwordReset.title}</h1>
             </div>
             
@@ -677,7 +677,7 @@ class EmailService {
 
       const mailOptions = {
         from: {
-          name: process.env.EMAIL_FROM_NAME || 'Click App',
+          name: process.env.EMAIL_FROM_NAME || 'Click',
           address: process.env.EMAIL_FROM || process.env.EMAIL_USER
         },
         to: email,
