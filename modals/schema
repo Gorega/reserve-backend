@@ -6,6 +6,7 @@ CREATE TABLE users (
     phone VARCHAR(20) NOT NULL UNIQUE,
     profile_image TEXT,
     is_provider BOOLEAN DEFAULT FALSE,
+    is_agent BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -138,6 +139,8 @@ CREATE TABLE bookings (
     provider_earnings DECIMAL(10,2) DEFAULT 0,
     user_service_fee DECIMAL(10,2) DEFAULT 0,
     status ENUM('pending', 'confirmed', 'cancelled', 'completed') DEFAULT 'pending',
+    confirmed_by_user_id INT NULL, -- who confirmed the booking
+    confirmed_at DATETIME NULL,    -- when it was confirmed
     payment_status ENUM('unpaid', 'deposit_paid', 'fully_paid', 'refunded') DEFAULT 'unpaid',
     deposit_deadline DATETIME,
     auto_cancel_at DATETIME,
@@ -156,6 +159,7 @@ CREATE TABLE bookings (
     FOREIGN KEY (listing_id) REFERENCES listings(id),
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (host_id) REFERENCES users(id),
+    FOREIGN KEY (confirmed_by_user_id) REFERENCES users(id),
     FOREIGN KEY (pricing_option_id) REFERENCES pricing_options(id),
     FOREIGN KEY (appointment_slot_id) REFERENCES appointment_slots(id),
     INDEX idx_bookings_listing_dates (listing_id, start_datetime, end_datetime),
@@ -163,8 +167,10 @@ CREATE TABLE bookings (
     INDEX idx_bookings_host (host_id),
     INDEX idx_bookings_status (status),
     INDEX idx_bookings_ticket (listing_id, host_id, start_datetime, ticket_number),
+    INDEX idx_bookings_confirmed_by (confirmed_by_user_id),
     UNIQUE KEY unique_ticket_per_slot (listing_id, host_id, start_datetime, ticket_number)
 );
+
 
 CREATE TABLE payments (
     id INT AUTO_INCREMENT PRIMARY KEY,

@@ -1,7 +1,9 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const db = require('../config/database');
 const { unauthorized, notFound, conflict } = require('../utils/errorHandler');
+const emailService = require('../utils/emailService');
 
 /**
  * User Model
@@ -162,6 +164,16 @@ const userModel = {
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(userData.password, salt);
       
+      // Generate verification token if email is provided
+      let verificationToken = null;
+      let verificationTokenExpires = null;
+      
+      if (userData.email) {
+        verificationToken = crypto.randomBytes(32).toString('hex');
+        // Set expiration to 24 hours from now
+        verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      }
+      
       // Prepare user data for insertion
       const newUser = {
         name: userData.name,
@@ -169,7 +181,11 @@ const userModel = {
         password_hash: hashedPassword,
         phone: userData.phone,
         profile_image: userData.profile_image || null,
-        is_provider: userData.is_provider || false
+        is_provider: userData.is_provider || false,
+        email_verified: false, // Always false for new users
+        verification_token: verificationToken,
+        verification_token_expires: verificationTokenExpires,
+        verification_sent_at: userData.email ? new Date() : null
       };
       
       // Insert user
@@ -177,6 +193,27 @@ const userModel = {
       
       // Get created user
       const createdUser = await this.getById(result.insertId);
+      
+      // Send verification email if email is provided
+      if (userData.email && verificationToken) {
+        try {
+          const emailSent = await emailService.sendVerificationEmail(
+            userData.email,
+            userData.name,
+            verificationToken,
+            userData.language || 'ar'
+          );
+          
+          if (emailSent) {
+            console.log(`Verification email sent successfully to ${userData.email}`);
+          } else {
+            console.warn(`Failed to send verification email to ${userData.email}`);
+          }
+        } catch (emailError) {
+          console.error('Error sending verification email:', emailError);
+          // Don't throw error here - user creation should succeed even if email fails
+        }
+      }
       
       return createdUser;
     } catch (error) {
@@ -365,6 +402,123 @@ const userModel = {
   },
   
   /**
+   * Verify user email with token
+   * @param {string} token - Verification token
+   * @returns {Promise<Object>} - Verified user
+   */
+  async verifyEmail(token, language = 'ar') {
+    try {
+      // Find user by verification token
+      const users = await db.query(
+        'SELECT * FROM users WHERE verification_token = ? AND verification_token_expires > NOW()',
+        [token]
+      );
+      
+      if (users.length === 0) {
+        throw unauthorized('Invalid or expired verification token');
+      }
+      
+      const user = users[0];
+      
+      // Update user to mark email as verified
+      await db.update('users', user.id, {
+        email_verified: true,
+        verification_token: null,
+        verification_token_expires: null
+      });
+      
+      // Send welcome email
+      try {
+        await emailService.sendWelcomeEmail(user.email, user.name, language);
+      } catch (emailError) {
+        console.error('Error sending welcome email:', emailError);
+        // Don't throw error - verification should succeed even if welcome email fails
+      }
+      
+      // Get updated user
+      const verifiedUser = await this.getById(user.id);
+      
+      return verifiedUser;
+    } catch (error) {
+      console.error('Error verifying email:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Resend verification email
+   * @param {string} email - User email
+   * @returns {Promise<boolean>} - Success status
+   */
+  async resendVerificationEmail(email, language = 'ar') {
+    try {
+      // Find user by email
+      const user = await this.getByEmail(email);
+      
+      if (!user) {
+        throw notFound('User not found');
+      }
+      
+      // Check if email is already verified
+      if (user.email_verified) {
+        throw conflict('Email is already verified');
+      }
+      
+      // Generate new verification token
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      
+      // Update user with new token
+      await db.update('users', user.id, {
+        verification_token: verificationToken,
+        verification_token_expires: verificationTokenExpires,
+        verification_sent_at: new Date()
+      });
+      
+      // Send verification email
+      const emailSent = await emailService.sendVerificationEmail(
+        user.email,
+        user.name,
+        verificationToken,
+        language
+      );
+      
+      if (!emailSent) {
+        throw new Error('Failed to send verification email');
+      }
+      
+      console.log(`Verification email resent successfully to ${user.email}`);
+      return true;
+    } catch (error) {
+      console.error('Error resending verification email:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get user by verification token
+   * @param {string} token - Verification token
+   * @returns {Promise<Object>} - User object
+   */
+  async getByVerificationToken(token) {
+    try {
+      const users = await db.query(
+        'SELECT * FROM users WHERE verification_token = ? AND verification_token_expires > NOW()',
+        [token]
+      );
+      
+      if (users.length === 0) {
+        return null;
+      }
+      
+      return users[0];
+    } catch (error) {
+      console.error('Error getting user by verification token:', error);
+      throw error;
+    }
+  },
+
+  /**
    * Generate JWT token
    * @param {number} userId - User ID
    * @returns {string} - JWT token
@@ -376,4 +530,4 @@ const userModel = {
   }
 };
 
-module.exports = userModel; 
+module.exports = userModel;

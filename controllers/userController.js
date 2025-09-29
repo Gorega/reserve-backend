@@ -385,6 +385,78 @@ const userController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  /**
+   * Verify user email with token
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async verifyEmail(req, res, next) {
+    try {
+      const { token } = req.params;
+      const { language } = req.query; // Get language from query parameters
+      
+      if (!token) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Verification token is required'
+        });
+      }
+      
+      const user = await userModel.verifyEmail(token, language || 'ar');
+      
+      res.status(200).json({
+        status: 'success',
+        message: 'Email verified successfully! Welcome to our platform.',
+        data: {
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            email_verified: user.email_verified
+          }
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * Resend verification email
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async resendVerificationEmail(req, res, next) {
+    try {
+      const { email, language } = req.body;
+      
+      if (!email) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Email address is required'
+        });
+      }
+      
+      const success = await userModel.resendVerificationEmail(email, language || 'ar');
+      
+      if (success) {
+        res.status(200).json({
+          status: 'success',
+          message: 'Verification email sent successfully. Please check your inbox.'
+        });
+      } else {
+        res.status(500).json({
+          status: 'error',
+          message: 'Failed to send verification email. Please try again later.'
+        });
+      }
+    } catch (error) {
+      next(error);
+    }
   }
 };
 
@@ -448,4 +520,4 @@ module.exports = {
   ...userController,
   handleProfileImageUpload,
   updateProfileImage
-}; 
+};

@@ -42,6 +42,26 @@ router.post(
 );
 
 /**
+ * @route   GET /api/users/verify-email/:token
+ * @desc    Verify user email with token
+ * @access  Public
+ */
+router.get(
+  '/verify-email/:token',
+  userController.verifyEmail
+);
+
+/**
+ * @route   POST /api/users/resend-verification
+ * @desc    Resend verification email
+ * @access  Public
+ */
+router.post(
+  '/resend-verification',
+  userController.resendVerificationEmail
+);
+
+/**
  * @route   GET /api/users/profile
  * @desc    Get current user profile
  * @access  Private
@@ -155,4 +175,4 @@ router.delete(
   userController.delete
 );
 
-module.exports = router; 
+module.exports = router;

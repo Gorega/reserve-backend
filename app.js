@@ -54,6 +54,7 @@ const blockedDatesRoutes = require('./routes/blockedDatesRoutes');
 const cancellationPolicyRoutes = require('./routes/cancellationPolicyRoutes');
 const pricingOptionRoutes = require('./routes/pricingOptionRoutes');
 const specialPricingRoutes = require('./routes/specialPricingRoutes');
+const agentRoutes = require('./routes/agentRoutes');
 
 // Create Express app
 const app = express();
@@ -150,6 +151,7 @@ app.use('/api/listing-features', listingFeaturesRoutes);
 app.use('/api/blocked-dates', blockedDatesRoutes);
 app.use('/api/cancellation-policies', cancellationPolicyRoutes);
 app.use('/api/special-pricing', specialPricingRoutes);
+app.use('/api/agents', agentRoutes);
 
 // Root route
 app.get('/', (req, res) => {
