@@ -62,6 +62,36 @@ router.post(
 );
 
 /**
+ * @route   POST /api/users/generate-reset-code
+ * @desc    Generate and send password reset verification code via email
+ * @access  Public
+ */
+router.post(
+  '/generate-reset-code',
+  userController.generatePasswordResetCode
+);
+
+/**
+ * @route   POST /api/users/verify-reset-code
+ * @desc    Verify the password reset code
+ * @access  Public
+ */
+router.post(
+  '/verify-reset-code',
+  userController.verifyPasswordResetCode
+);
+
+/**
+ * @route   POST /api/users/reset-password
+ * @desc    Reset password using verified code
+ * @access  Public
+ */
+router.post(
+  '/reset-password',
+  userController.resetPasswordWithCode
+);
+
+/**
  * @route   GET /api/users/profile
  * @desc    Get current user profile
  * @access  Private

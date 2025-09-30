@@ -457,6 +457,161 @@ const userController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  /**
+   * Generate password reset verification code
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async generatePasswordResetCode(req, res, next) {
+    try {
+      const { email, language } = req.body;
+      
+      if (!email) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Email address is required'
+        });
+      }
+
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Please enter a valid email address'
+        });
+      }
+      
+      const success = await userModel.generatePasswordResetCode(email.toLowerCase().trim(), language || 'ar');
+      
+      if (success) {
+        res.status(200).json({
+          status: 'success',
+          message: 'A verification code has been sent to your email address. Please check your inbox and enter the code to reset your password.'
+        });
+      } else {
+        res.status(500).json({
+          status: 'error',
+          message: 'Failed to send verification code. Please try again later.'
+        });
+      }
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * Verify password reset code
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async verifyPasswordResetCode(req, res, next) {
+    try {
+      const { email, code } = req.body;
+      
+      if (!email || !code) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Email and verification code are required'
+        });
+      }
+
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Please enter a valid email address'
+        });
+      }
+
+      // Validate code format (6 digits)
+      if (!/^\d{6}$/.test(code)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Verification code must be 6 digits'
+        });
+      }
+      
+      const user = await userModel.verifyPasswordResetCode(email.toLowerCase().trim(), code);
+      
+      if (user) {
+        res.status(200).json({
+          status: 'success',
+          message: 'Verification code is valid. You can now set a new password.'
+        });
+      }
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * Reset password with verification code
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async resetPasswordWithCode(req, res, next) {
+    try {
+      const { email, code, newPassword } = req.body;
+      
+      if (!email || !code || !newPassword) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Email, verification code, and new password are required'
+        });
+      }
+
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Please enter a valid email address'
+        });
+      }
+
+      // Validate code format (6 digits)
+      if (!/^\d{6}$/.test(code)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Verification code must be 6 digits'
+        });
+      }
+
+      // Validate password strength
+      if (newPassword.length < 6) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Password must be at least 6 characters long'
+        });
+      }
+      
+      const success = await userModel.resetPasswordWithCode(
+        email.toLowerCase().trim(), 
+        code, 
+        newPassword
+      );
+      
+      if (success) {
+        res.status(200).json({
+          status: 'success',
+          message: 'Password has been reset successfully. You can now log in with your new password.'
+        });
+      } else {
+        res.status(500).json({
+          status: 'error',
+          message: 'Failed to reset password. Please try again.'
+        });
+      }
+    } catch (error) {
+      next(error);
+    }
   }
 };
 

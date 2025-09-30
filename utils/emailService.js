@@ -61,6 +61,22 @@ class EmailService {
           regards: 'Best regards,',
           team: 'The Click Team',
           rights: 'All rights reserved.'
+        },
+        passwordResetCode: {
+          subject: 'Password Reset Verification Code - Click',
+          title: 'Password Reset Verification',
+          greeting: 'Hello',
+          message: 'We received a request to reset your password. Please use the verification code below to proceed with resetting your password:',
+          codeLabel: 'Your Verification Code:',
+          expiryNote: '⏰ Important:',
+          expiryText: 'This verification code will expire in 15 minutes for your security.',
+          instructions: 'Enter this code in the app to verify your identity and set a new password.',
+          securityNote: '🔒 Security Note:',
+          securityText: 'If you didn\'t request this password reset, please ignore this email and your password will remain unchanged.',
+          ignore: 'If you didn\'t request this password reset, please contact our support team immediately.',
+          regards: 'Best regards,',
+          team: 'The Click Team',
+          copyright: '© 2025 Click. All rights reserved.'
         }
       },
       ar: {
@@ -107,6 +123,22 @@ class EmailService {
           regards: 'مع أطيب التحيات،',
           team: 'فريق كليك',
           rights: 'جميع الحقوق محفوظة.'
+        },
+        passwordResetCode: {
+          subject: 'رمز التحقق لإعادة تعيين كلمة المرور - كليك',
+          title: 'التحقق من إعادة تعيين كلمة المرور',
+          greeting: 'مرحباً',
+          message: 'تلقينا طلباً لإعادة تعيين كلمة المرور الخاصة بك. يرجى استخدام رمز التحقق أدناه للمتابعة مع إعادة تعيين كلمة المرور:',
+          codeLabel: 'رمز التحقق الخاص بك:',
+          expiryNote: '⏰ مهم:',
+          expiryText: 'سينتهي صلاحية رمز التحقق هذا خلال 15 دقيقة لأمانك.',
+          instructions: 'أدخل هذا الرمز في التطبيق للتحقق من هويتك وتعيين كلمة مرور جديدة.',
+          securityNote: '🔒 ملاحظة أمنية:',
+          securityText: 'إذا لم تطلب إعادة تعيين كلمة المرور هذه، يرجى تجاهل هذا البريد الإلكتروني وستبقى كلمة المرور الخاصة بك دون تغيير.',
+          ignore: 'إذا لم تطلب إعادة تعيين كلمة المرور هذه، يرجى الاتصال بفريق الدعم فوراً.',
+          regards: 'مع أطيب التحيات،',
+          team: 'فريق كليك',
+          copyright: '© 2025 كليك. جميع الحقوق محفوظة.'
         }
       },
       he: {
@@ -153,6 +185,22 @@ class EmailService {
           regards: 'בברכה,',
           team: 'צוות אפליקציית קליק',
           rights: 'כל הזכויות שמורות.'
+        },
+        passwordResetCode: {
+          subject: 'קוד אימות לאיפוס סיסמה - קליק',
+          title: 'אימות איפוס סיסמה',
+          greeting: 'שלום',
+          message: 'קיבלנו בקשה לאיפוס הסיסמה שלכם. אנא השתמשו בקוד האימות למטה כדי להמשיך עם איפוס הסיסמה:',
+          codeLabel: 'קוד האימות שלכם:',
+          expiryNote: '⏰ חשוב:',
+          expiryText: 'קוד האימות הזה יפוג תוך 15 דקות לביטחונכם.',
+          instructions: 'הזינו את הקוד הזה באפליקציה כדי לאמת את זהותכם ולהגדיר סיסמה חדשה.',
+          securityNote: '🔒 הערת אבטחה:',
+          securityText: 'אם לא ביקשתם איפוס סיסמה זה, אנא התעלמו מהאימייל הזה והסיסמה שלכם תישאר ללא שינוי.',
+          ignore: 'אם לא ביקשתם איפוס סיסמה זה, אנא צרו קשר עם צוות התמיכה שלנו מיד.',
+          regards: 'בברכה,',
+          team: 'צוות קליק',
+          copyright: '© 2025 קליק. כל הזכויות שמורות.'
         }
       }
     };
@@ -654,6 +702,204 @@ class EmailService {
     </body>
     </html>
     `;
+  }
+
+  /**
+   * Create password reset code email template
+   * @param {string} userName - User's name
+   * @param {string} resetCode - 6-digit verification code
+   * @param {string} language - Language code (ar, en, he)
+   * @returns {string} - HTML email template
+   */
+  createPasswordResetCodeEmailTemplate(userName, resetCode, language = 'ar') {
+    const t = this.translations[language] || this.translations['ar'];
+    const isRTL = language === 'ar' || language === 'he';
+    const dir = isRTL ? 'rtl' : 'ltr';
+    const textAlign = isRTL ? 'right' : 'left';
+    
+    return `
+    <!DOCTYPE html>
+    <html lang="${language}" dir="${dir}">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${t.passwordResetCode.title} - Click</title>
+        <style>
+            body {
+                font-family: ${isRTL ? "'Segoe UI', 'Tahoma', 'Arial', sans-serif" : "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"};
+                line-height: 1.6;
+                color: #333;
+                max-width: 600px;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #f4f4f4;
+                direction: ${dir};
+                text-align: ${textAlign};
+            }
+            .container {
+                background: white;
+                padding: 40px;
+                border-radius: 10px;
+                box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            }
+            .header {
+                text-align: center;
+                margin-bottom: 30px;
+            }
+            .logo {
+                font-size: 32px;
+                font-weight: bold;
+                color: #FF5A5F;
+                margin-bottom: 10px;
+            }
+            .title {
+                font-size: 24px;
+                color: #333;
+                margin-bottom: 20px;
+            }
+            .code-box {
+                background-color: #f8f9fa;
+                border: 2px solid #FF5A5F;
+                border-radius: 8px;
+                padding: 20px;
+                margin: 20px 0;
+                text-align: center;
+            }
+            .code-label {
+                font-weight: bold;
+                color: #333;
+                margin-bottom: 10px;
+                font-size: 16px;
+            }
+            .code-value {
+                font-family: 'Courier New', monospace;
+                font-size: 32px;
+                font-weight: bold;
+                color: #FF5A5F;
+                background-color: white;
+                padding: 15px;
+                border-radius: 5px;
+                border: 1px solid #dee2e6;
+                letter-spacing: 4px;
+            }
+            .expiry-note {
+                background-color: #fff3cd;
+                border: 1px solid #ffeaa7;
+                border-radius: 8px;
+                padding: 15px;
+                margin: 20px 0;
+            }
+            .expiry-title {
+                font-weight: bold;
+                color: #856404;
+                margin-bottom: 8px;
+            }
+            .security-note {
+                background-color: #d1ecf1;
+                border: 1px solid #bee5eb;
+                border-radius: 8px;
+                padding: 15px;
+                margin: 20px 0;
+            }
+            .security-title {
+                font-weight: bold;
+                color: #0c5460;
+                margin-bottom: 8px;
+            }
+            .footer {
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                text-align: center;
+                color: #666;
+                font-size: 14px;
+            }
+            .warning {
+                background-color: #f8d7da;
+                border: 1px solid #f5c6cb;
+                border-radius: 8px;
+                padding: 15px;
+                margin: 20px 0;
+                color: #721c24;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <div class="logo">Click</div>
+                <h1 class="title">${t.passwordResetCode.title}</h1>
+            </div>
+            
+            <p><strong>${t.passwordResetCode.greeting} ${userName},</strong></p>
+            
+            <p>${t.passwordResetCode.message}</p>
+            
+            <div class="code-box">
+                <div class="code-label">${t.passwordResetCode.codeLabel}</div>
+                <div class="code-value">${resetCode}</div>
+            </div>
+            
+            <div class="expiry-note">
+                <div class="expiry-title">${t.passwordResetCode.expiryNote}</div>
+                <p>${t.passwordResetCode.expiryText}</p>
+            </div>
+            
+            <div class="security-note">
+                <div class="security-title">${t.passwordResetCode.securityNote}</div>
+                <p>${t.passwordResetCode.securityText}</p>
+            </div>
+            
+            <div class="warning">
+                <p><strong>⚠️ ${t.passwordResetCode.ignore}</strong></p>
+            </div>
+            
+            <div class="footer">
+                <p>${t.passwordResetCode.regards}<br>
+                <strong>${t.passwordResetCode.team}</strong></p>
+                <p style="margin-top: 20px; font-size: 12px;">${t.passwordResetCode.copyright}</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+  }
+
+  /**
+   * Send password reset code email
+   * @param {string} email - Recipient email
+   * @param {string} userName - User's name
+   * @param {string} resetCode - 6-digit verification code
+   * @param {string} language - Language code (ar, en, he)
+   * @returns {Promise<boolean>} - Success status
+   */
+  async sendPasswordResetCodeEmail(email, userName, resetCode, language = 'ar') {
+    try {
+      if (!this.transporter) {
+        throw new Error('Email transporter not initialized');
+      }
+
+      const htmlContent = this.createPasswordResetCodeEmailTemplate(userName, resetCode, language);
+      const t = this.translations[language] || this.translations['ar'];
+
+      const mailOptions = {
+        from: {
+          name: process.env.EMAIL_FROM_NAME || 'Click',
+          address: process.env.EMAIL_FROM || process.env.EMAIL_USER
+        },
+        to: email,
+        subject: t.passwordResetCode.subject,
+        html: htmlContent,
+        text: `${t.passwordResetCode.greeting} ${userName},\n\n${t.passwordResetCode.message}\n\n${t.passwordResetCode.codeLabel} ${resetCode}\n\n${t.passwordResetCode.expiryText}\n\n${t.passwordResetCode.securityText}\n\n${t.passwordResetCode.regards}\n${t.passwordResetCode.team}`
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      console.log('Password reset code email sent successfully:', result.messageId);
+      return true;
+    } catch (error) {
+      console.error('Error sending password reset code email:', error);
+      return false;
+    }
   }
 
   /**

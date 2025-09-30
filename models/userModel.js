@@ -519,6 +519,119 @@ const userModel = {
   },
 
   /**
+   * Generate password reset verification code
+   * @param {string} email - User email
+   * @param {string} language - Language for email template
+   * @returns {Promise<boolean>} - Success status
+   */
+  async generatePasswordResetCode(email, language = 'ar') {
+    try {
+      // Find user by email
+      const user = await this.getByEmail(email);
+      
+      if (!user) {
+        throw notFound('User not found');
+      }
+      
+      // Generate a 6-digit verification code
+      const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      // Set expiration time (15 minutes from now)
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+      
+      // Store verification code in database
+      await db.update('users', user.id, {
+        reset_code: verificationCode,
+        reset_code_expires: expiresAt
+      });
+      
+      // Send verification code email
+      const emailSent = await emailService.sendPasswordResetCodeEmail(
+        user.email,
+        user.name,
+        verificationCode,
+        language
+      );
+      
+      if (!emailSent) {
+        throw new Error('Failed to send password reset email');
+      }
+      
+      console.log(`Password reset code sent successfully to ${user.email}`);
+      return true;
+    } catch (error) {
+      console.error('Error in generating password reset code:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Verify password reset code
+   * @param {string} email - User email
+   * @param {string} code - Verification code
+   * @returns {Promise<Object>} - User data if code is valid
+   */
+  async verifyPasswordResetCode(email, code) {
+    try {
+      // Find user by email
+      const user = await this.getByEmail(email);
+      
+      if (!user) {
+        throw notFound('User not found');
+      }
+      
+      // Check if code exists and hasn't expired
+      if (!user.reset_code || !user.reset_code_expires) {
+        throw unauthorized('No password reset code found');
+      }
+      
+      if (new Date() > new Date(user.reset_code_expires)) {
+        throw unauthorized('Password reset code has expired');
+      }
+      
+      if (user.reset_code !== code) {
+        throw unauthorized('Invalid verification code');
+      }
+      
+      return user;
+    } catch (error) {
+      console.error('Error in verifying password reset code:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Reset password with verification code
+   * @param {string} email - User email
+   * @param {string} code - Verification code
+   * @param {string} newPassword - New password
+   * @returns {Promise<boolean>} - Success status
+   */
+  async resetPasswordWithCode(email, code, newPassword) {
+    try {
+      // Verify the code first
+      const user = await this.verifyPasswordResetCode(email, code);
+      
+      // Hash the new password
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(newPassword, salt);
+      
+      // Update user with new password and clear reset code
+      await db.update('users', user.id, {
+        password_hash: hashedPassword,
+        reset_code: null,
+        reset_code_expires: null
+      });
+      
+      console.log(`Password reset successfully for ${user.email}`);
+      return true;
+    } catch (error) {
+      console.error('Error in resetting password:', error);
+      throw error;
+    }
+  },
+
+  /**
    * Generate JWT token
    * @param {number} userId - User ID
    * @returns {string} - JWT token
