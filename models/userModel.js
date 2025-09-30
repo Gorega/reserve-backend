@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const db = require('../config/database');
 const { unauthorized, notFound, conflict } = require('../utils/errorHandler');
 const emailService = require('../utils/emailService');
+const { getMessage } = require('../utils/languageUtils');
 
 /**
  * User Model
@@ -74,14 +75,15 @@ const userModel = {
   /**
    * Get user by ID
    * @param {number} id - User ID
+   * @param {string} language - Language code for error messages
    * @returns {Promise<Object>} - User object
    */
-  async getById(id) {
+  async getById(id, language = 'ar') {
     try {
       const user = await db.getById('users', id);
       
       if (!user) {
-        throw notFound('User not found');
+        throw notFound(getMessage('USER_NOT_FOUND', language));
       }
       
       // Remove sensitive data
@@ -137,26 +139,27 @@ const userModel = {
   /**
    * Create a new user
    * @param {Object} userData - User data
+   * @param {string} language - Language code for error messages
    * @returns {Promise<Object>} - Created user
    */
-  async create(userData) {
+  async create(userData, language = 'ar') {
     try {
       // Check if phone is provided
       if (!userData.phone) {
-        throw conflict('Phone number is required');
+        throw conflict(getMessage('PHONE_REQUIRED', language));
       }
       
       // Check if phone already exists
       const existingPhone = await this.getByPhone(userData.phone);
       if (existingPhone) {
-        throw conflict('Phone number already in use');
+        throw conflict(getMessage('PHONE_ALREADY_IN_USE', language));
       }
       
       // Check if email already exists (if provided)
       if (userData.email) {
         const existingEmail = await this.getByEmail(userData.email);
         if (existingEmail) {
-          throw conflict('Email already in use');
+          throw conflict(getMessage('EMAIL_ALREADY_IN_USE', language));
         }
       }
       
@@ -192,7 +195,7 @@ const userModel = {
       const result = await db.insert('users', newUser);
       
       // Get created user
-      const createdUser = await this.getById(result.insertId);
+      const createdUser = await this.getById(result.insertId, language);
       
       // Send verification email if email is provided
       if (userData.email && verificationToken) {
@@ -226,19 +229,20 @@ const userModel = {
    * Update a user
    * @param {number} id - User ID
    * @param {Object} userData - User data to update
+   * @param {string} language - Language code for error messages
    * @returns {Promise<Object>} - Updated user
    */
-  async update(id, userData) {
+  async update(id, userData, language = 'ar') {
     try {
       // Check if user exists
-      const user = await this.getById(id);
+      const user = await this.getById(id, language);
       
       // Check if email is being changed and if it's already in use
       if (userData.email !== undefined && userData.email !== user.email) {
         if (userData.email) {
           const existingUser = await this.getByEmail(userData.email);
           if (existingUser) {
-            throw conflict('Email already in use');
+            throw conflict(getMessage('EMAIL_ALREADY_IN_USE', language));
           }
         }
       }
@@ -247,7 +251,7 @@ const userModel = {
       if (userData.phone && userData.phone !== user.phone) {
         const existingUser = await this.getByPhone(userData.phone);
         if (existingUser) {
-          throw conflict('Phone number already in use');
+          throw conflict(getMessage('PHONE_ALREADY_IN_USE', language));
         }
       }
       
@@ -271,7 +275,7 @@ const userModel = {
       await db.update('users', id, updateData);
       
       // Get updated user
-      const updatedUser = await this.getById(id);
+      const updatedUser = await this.getById(id, language);
       
       return updatedUser;
     } catch (error) {
@@ -283,12 +287,13 @@ const userModel = {
   /**
    * Delete a user
    * @param {number} id - User ID
+   * @param {string} language - Language code for error messages
    * @returns {Promise<boolean>} - Success status
    */
-  async delete(id) {
+  async delete(id, language = 'ar') {
     try {
       // Check if user exists
-      await this.getById(id);
+      await this.getById(id, language);
       
       // Delete user
       await db.remove('users', id);
@@ -305,9 +310,10 @@ const userModel = {
    * @param {string} identifier - User email or phone
    * @param {string} password - User password
    * @param {Object} res - Express response object for setting cookies
+   * @param {string} language - Language code for error messages
    * @returns {Promise<Object>} - User object with token
    */
-  async login(identifier, password, res) {
+  async login(identifier, password, res, language = 'ar') {
     try {
       // Check if identifier is email or phone
       let user = null;
@@ -322,13 +328,13 @@ const userModel = {
       
       // Check if user exists
       if (!user) {
-        throw unauthorized('Invalid credentials');
+        throw unauthorized(getMessage('INVALID_CREDENTIALS', language));
       }
       
       // Check if password is correct
       const isMatch = await bcrypt.compare(password, user.password_hash);
       if (!isMatch) {
-        throw unauthorized('Invalid credentials');
+        throw unauthorized(getMessage('INVALID_CREDENTIALS', language));
       }
       
       // Generate JWT token
@@ -369,14 +375,15 @@ const userModel = {
   },
   
   /**
-   * Update user to become a host/provider
+   * Make user a host/provider
    * @param {number} userId - User ID
+   * @param {string} language - Language code for error messages
    * @returns {Promise<Object>} - Updated user
    */
-  async becomeHost(userId) {
+  async becomeHost(userId, language = 'ar') {
     try {
       // Check if user exists
-      const user = await this.getById(userId);
+      const user = await this.getById(userId, language);
       
       // If user is already a provider, just return the user
       if (user.is_provider) {
@@ -392,7 +399,7 @@ const userModel = {
       await db.update('users', userId, updateData);
       
       // Get updated user
-      const updatedUser = await this.getById(userId);
+      const updatedUser = await this.getById(userId, language);
       
       return updatedUser;
     } catch (error) {
@@ -415,7 +422,7 @@ const userModel = {
       );
       
       if (users.length === 0) {
-        throw unauthorized('Invalid or expired verification token');
+        throw unauthorized(getMessage('INVALID_OR_EXPIRED_TOKEN', language));
       }
       
       const user = users[0];
@@ -436,7 +443,7 @@ const userModel = {
       }
       
       // Get updated user
-      const verifiedUser = await this.getById(user.id);
+      const verifiedUser = await this.getById(user.id, language);
       
       return verifiedUser;
     } catch (error) {
@@ -456,12 +463,12 @@ const userModel = {
       const user = await this.getByEmail(email);
       
       if (!user) {
-        throw notFound('User not found');
+        throw notFound(getMessage('USER_NOT_FOUND', language));
       }
       
       // Check if email is already verified
       if (user.email_verified) {
-        throw conflict('Email is already verified');
+        throw conflict(getMessage('EMAIL_ALREADY_VERIFIED', language));
       }
       
       // Generate new verification token
@@ -484,7 +491,7 @@ const userModel = {
       );
       
       if (!emailSent) {
-        throw new Error('Failed to send verification email');
+        throw new Error(getMessage('FAILED_TO_SEND_VERIFICATION_EMAIL', language));
       }
       
       console.log(`Verification email resent successfully to ${user.email}`);
@@ -530,7 +537,7 @@ const userModel = {
       const user = await this.getByEmail(email);
       
       if (!user) {
-        throw notFound('User not found');
+        throw notFound(getMessage('USER_NOT_FOUND', language));
       }
       
       // Generate a 6-digit verification code
@@ -554,7 +561,7 @@ const userModel = {
       );
       
       if (!emailSent) {
-        throw new Error('Failed to send password reset email');
+        throw new Error(getMessage('FAILED_TO_SEND_RESET_EMAIL', language));
       }
       
       console.log(`Password reset code sent successfully to ${user.email}`);
@@ -569,28 +576,29 @@ const userModel = {
    * Verify password reset code
    * @param {string} email - User email
    * @param {string} code - Verification code
+   * @param {string} language - Language code for error messages
    * @returns {Promise<Object>} - User data if code is valid
    */
-  async verifyPasswordResetCode(email, code) {
+  async verifyPasswordResetCode(email, code, language = 'ar') {
     try {
       // Find user by email
       const user = await this.getByEmail(email);
       
       if (!user) {
-        throw notFound('User not found');
+        throw notFound(getMessage('USER_NOT_FOUND', language));
       }
       
       // Check if code exists and hasn't expired
       if (!user.reset_code || !user.reset_code_expires) {
-        throw unauthorized('No password reset code found');
+        throw unauthorized(getMessage('NO_PASSWORD_RESET_CODE', language));
       }
       
       if (new Date() > new Date(user.reset_code_expires)) {
-        throw unauthorized('Password reset code has expired');
+        throw unauthorized(getMessage('PASSWORD_RESET_CODE_EXPIRED', language));
       }
       
       if (user.reset_code !== code) {
-        throw unauthorized('Invalid verification code');
+        throw unauthorized(getMessage('INVALID_RESET_CODE', language));
       }
       
       return user;
@@ -605,12 +613,13 @@ const userModel = {
    * @param {string} email - User email
    * @param {string} code - Verification code
    * @param {string} newPassword - New password
+   * @param {string} language - Language code for error messages
    * @returns {Promise<boolean>} - Success status
    */
-  async resetPasswordWithCode(email, code, newPassword) {
+  async resetPasswordWithCode(email, code, newPassword, language = 'ar') {
     try {
       // Verify the code first
-      const user = await this.verifyPasswordResetCode(email, code);
+      const user = await this.verifyPasswordResetCode(email, code, language);
       
       // Hash the new password
       const salt = await bcrypt.genSalt(10);

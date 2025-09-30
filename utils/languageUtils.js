@@ -128,6 +128,68 @@ const translations = {
     ar: 'تم تحديث الصورة الشخصية بنجاح',
     en: 'Profile image updated successfully',
     he: 'תמונת הפרופיל עודכנה בהצלחה'
+  },
+
+  // User Management Messages
+  USER_NOT_FOUND: {
+    ar: 'المستخدم غير موجود',
+    en: 'User not found',
+    he: 'המשתמש לא נמצא'
+  },
+  PHONE_REQUIRED: {
+    ar: 'رقم الهاتف مطلوب',
+    en: 'Phone number is required',
+    he: 'נדרש מספר טלפון'
+  },
+  PHONE_ALREADY_IN_USE: {
+    ar: 'رقم الهاتف مستخدم بالفعل',
+    en: 'Phone number already in use',
+    he: 'מספר הטלפון כבר בשימוש'
+  },
+  EMAIL_ALREADY_IN_USE: {
+    ar: 'البريد الإلكتروني مستخدم بالفعل',
+    en: 'Email already in use',
+    he: 'האימייל כבר בשימוש'
+  },
+  INVALID_CREDENTIALS: {
+    ar: 'بيانات الاعتماد غير صحيحة',
+    en: 'Invalid credentials',
+    he: 'פרטי התחברות שגויים'
+  },
+  INVALID_OR_EXPIRED_TOKEN: {
+    ar: 'رمز التحقق غير صحيح أو منتهي الصلاحية',
+    en: 'Invalid or expired verification token',
+    he: 'אסימון אימות לא תקין או פג תוקף'
+  },
+  EMAIL_ALREADY_VERIFIED: {
+    ar: 'البريد الإلكتروني مُتحقق منه بالفعل',
+    en: 'Email is already verified',
+    he: 'האימייל כבר מאומת'
+  },
+  FAILED_TO_SEND_VERIFICATION_EMAIL: {
+    ar: 'فشل في إرسال بريد التحقق',
+    en: 'Failed to send verification email',
+    he: 'שליחת אימייל האימות נכשלה'
+  },
+  NO_PASSWORD_RESET_CODE: {
+    ar: 'لم يتم العثور على رمز إعادة تعيين كلمة المرور',
+    en: 'No password reset code found',
+    he: 'לא נמצא קוד איפוס סיסמה'
+  },
+  PASSWORD_RESET_CODE_EXPIRED: {
+    ar: 'انتهت صلاحية رمز إعادة تعيين كلمة المرور',
+    en: 'Password reset code has expired',
+    he: 'קוד איפוס הסיסמה פג תוקף'
+  },
+  INVALID_RESET_CODE: {
+    ar: 'رمز التحقق غير صحيح',
+    en: 'Invalid verification code',
+    he: 'קוד אימות שגוי'
+  },
+  FAILED_TO_SEND_RESET_EMAIL: {
+    ar: 'فشل في إرسال بريد إعادة تعيين كلمة المرور',
+    en: 'Failed to send password reset email',
+    he: 'שליחת אימייל איפוס סיסמה נכשלה'
   }
 };
 
