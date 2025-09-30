@@ -1,6 +1,7 @@
 const userModel = require('../models/userModel');
 const { getFileUrl, deleteFile, uploadToCloudinary, uploadSingle } = require('../utils/fileUpload');
 const { badRequest, notFound } = require('../utils/errorHandler');
+const { getMessage, getLanguageFromRequest, sendResponse } = require('../utils/languageUtils');
 const path = require('path');
 
 /**
@@ -31,8 +32,6 @@ const userController = {
         filters.is_provider = req.query.is_provider === 'true';
       }
       
-      // Log the parameters for debugging
-      console.log('Controller parameters:', { page, limit, filters });
       
       // Get users with explicit number parameters
       const users = await userModel.getAll(filters, Number(page), Number(limit));
@@ -103,6 +102,7 @@ const userController = {
   async create(req, res, next) {
     try {
       const userData = req.body;
+      const language = getLanguageFromRequest(req);
       
       // Handle file upload if present
       if (req.file) {
@@ -122,16 +122,13 @@ const userController = {
           if (req.file.path && require('fs').existsSync(req.file.path)) {
             require('fs').unlinkSync(req.file.path);
           }
-          return next(badRequest('Failed to upload profile image'));
+          return sendResponse(res, 400, 'error', 'UPLOAD_FAILED', language);
         }
       }
       
       const user = await userModel.create(userData);
       
-      res.status(201).json({
-        status: 'success',
-        data: user
-      });
+      return sendResponse(res, 201, 'success', 'USER_CREATED', language, user);
     } catch (error) {
       // Delete uploaded file if there was an error
       if (req.file && req.file.path && require('fs').existsSync(req.file.path)) {
@@ -151,6 +148,7 @@ const userController = {
     try {
       const { id } = req.params;
       const userData = req.body;
+      const language = getLanguageFromRequest(req);
       
       // Handle file upload if present
       if (req.file) {
@@ -183,7 +181,7 @@ const userController = {
           if (req.file.path && require('fs').existsSync(req.file.path)) {
             require('fs').unlinkSync(req.file.path);
           }
-          return next(badRequest('Failed to upload profile image'));
+          return sendResponse(res, 400, 'error', 'UPLOAD_FAILED', language);
         }
       } else if (userData.profile_image === null) {
         // If profile_image is explicitly set to null, remove the profile image
@@ -200,10 +198,7 @@ const userController = {
       
       const user = await userModel.update(id, userData);
       
-      res.status(200).json({
-        status: 'success',
-        data: user
-      });
+      return sendResponse(res, 200, 'success', 'USER_UPDATED', language, user);
     } catch (error) {
       // Delete uploaded file if there was an error
       if (req.file && req.file.path && require('fs').existsSync(req.file.path)) {
@@ -318,12 +313,10 @@ const userController = {
   async login(req, res, next) {
     try {
       const { identifier, password } = req.body;
+      const language = getLanguageFromRequest(req);
       
       if (!identifier) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Phone number or email is required'
-        });
+        return sendResponse(res, 400, 'error', 'PHONE_EMAIL_REQUIRED', language);
       }
       
       const user = await userModel.login(identifier, password, res);
@@ -345,6 +338,8 @@ const userController = {
    */
   async logout(req, res, next) {
     try {
+      const language = getLanguageFromRequest(req);
+      
       // Clear cookies
       res.clearCookie('token', {
         httpOnly: true,
@@ -355,10 +350,7 @@ const userController = {
         path: '/'
       });
       
-      res.status(200).json({
-        status: 'success',
-        message: 'Logged out successfully'
-      });
+      return sendResponse(res, 200, 'success', 'LOGGED_OUT_SUCCESS', language);
     } catch (error) {
       next(error);
     }
@@ -396,27 +388,20 @@ const userController = {
   async verifyEmail(req, res, next) {
     try {
       const { token } = req.params;
-      const { language } = req.query; // Get language from query parameters
+      const language = getLanguageFromRequest(req);
       
       if (!token) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Verification token is required'
-        });
+        return sendResponse(res, 400, 'error', 'VERIFICATION_TOKEN_REQUIRED', language);
       }
       
-      const user = await userModel.verifyEmail(token, language || 'ar');
+      const user = await userModel.verifyEmail(token, language);
       
-      res.status(200).json({
-        status: 'success',
-        message: 'Email verified successfully! Welcome to our platform.',
-        data: {
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            email_verified: user.email_verified
-          }
+      return sendResponse(res, 200, 'success', 'EMAIL_VERIFIED_SUCCESS', language, {
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          email_verified: user.email_verified
         }
       });
     } catch (error) {
@@ -432,27 +417,19 @@ const userController = {
    */
   async resendVerificationEmail(req, res, next) {
     try {
-      const { email, language } = req.body;
+      const { email } = req.body;
+      const language = getLanguageFromRequest(req);
       
       if (!email) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Email address is required'
-        });
+        return sendResponse(res, 400, 'error', 'EMAIL_REQUIRED', language);
       }
       
-      const success = await userModel.resendVerificationEmail(email, language || 'ar');
+      const success = await userModel.resendVerificationEmail(email, language);
       
       if (success) {
-        res.status(200).json({
-          status: 'success',
-          message: 'Verification email sent successfully. Please check your inbox.'
-        });
+        return sendResponse(res, 200, 'success', 'VERIFICATION_EMAIL_SENT', language);
       } else {
-        res.status(500).json({
-          status: 'error',
-          message: 'Failed to send verification email. Please try again later.'
-        });
+        return sendResponse(res, 500, 'error', 'VERIFICATION_EMAIL_FAILED', language);
       }
     } catch (error) {
       next(error);
@@ -467,36 +444,25 @@ const userController = {
    */
   async generatePasswordResetCode(req, res, next) {
     try {
-      const { email, language } = req.body;
+      const { email } = req.body;
+      const language = getLanguageFromRequest(req);
       
       if (!email) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Email address is required'
-        });
+        return sendResponse(res, 400, 'error', 'EMAIL_REQUIRED', language);
       }
 
       // Basic email validation
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Please enter a valid email address'
-        });
+        return sendResponse(res, 400, 'error', 'INVALID_EMAIL', language);
       }
       
-      const success = await userModel.generatePasswordResetCode(email.toLowerCase().trim(), language || 'ar');
+      const success = await userModel.generatePasswordResetCode(email.toLowerCase().trim(), language);
       
       if (success) {
-        res.status(200).json({
-          status: 'success',
-          message: 'A verification code has been sent to your email address. Please check your inbox and enter the code to reset your password.'
-        });
+        return sendResponse(res, 200, 'success', 'PASSWORD_RESET_CODE_SENT', language);
       } else {
-        res.status(500).json({
-          status: 'error',
-          message: 'Failed to send verification code. Please try again later.'
-        });
+        return sendResponse(res, 500, 'error', 'PASSWORD_RESET_CODE_FAILED', language);
       }
     } catch (error) {
       next(error);
@@ -512,38 +478,27 @@ const userController = {
   async verifyPasswordResetCode(req, res, next) {
     try {
       const { email, code } = req.body;
+      const language = getLanguageFromRequest(req);
       
       if (!email || !code) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Email and verification code are required'
-        });
+        return sendResponse(res, 400, 'error', 'EMAIL_CODE_REQUIRED', language);
       }
 
       // Basic email validation
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Please enter a valid email address'
-        });
+        return sendResponse(res, 400, 'error', 'INVALID_EMAIL', language);
       }
 
       // Validate code format (6 digits)
       if (!/^\d{6}$/.test(code)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Verification code must be 6 digits'
-        });
+        return sendResponse(res, 400, 'error', 'INVALID_VERIFICATION_CODE', language);
       }
       
       const user = await userModel.verifyPasswordResetCode(email.toLowerCase().trim(), code);
       
       if (user) {
-        res.status(200).json({
-          status: 'success',
-          message: 'Verification code is valid. You can now set a new password.'
-        });
+        return sendResponse(res, 200, 'success', 'VERIFICATION_CODE_VALID', language);
       }
     } catch (error) {
       next(error);
@@ -559,37 +514,26 @@ const userController = {
   async resetPasswordWithCode(req, res, next) {
     try {
       const { email, code, newPassword } = req.body;
+      const language = getLanguageFromRequest(req);
       
       if (!email || !code || !newPassword) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Email, verification code, and new password are required'
-        });
+        return sendResponse(res, 400, 'error', 'EMAIL_CODE_PASSWORD_REQUIRED', language);
       }
 
       // Basic email validation
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Please enter a valid email address'
-        });
+        return sendResponse(res, 400, 'error', 'INVALID_EMAIL', language);
       }
 
       // Validate code format (6 digits)
       if (!/^\d{6}$/.test(code)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Verification code must be 6 digits'
-        });
+        return sendResponse(res, 400, 'error', 'INVALID_VERIFICATION_CODE', language);
       }
 
       // Validate password strength
       if (newPassword.length < 6) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Password must be at least 6 characters long'
-        });
+        return sendResponse(res, 400, 'error', 'PASSWORD_MIN_LENGTH', language);
       }
       
       const success = await userModel.resetPasswordWithCode(
@@ -599,15 +543,9 @@ const userController = {
       );
       
       if (success) {
-        res.status(200).json({
-          status: 'success',
-          message: 'Password has been reset successfully. You can now log in with your new password.'
-        });
+        return sendResponse(res, 200, 'success', 'PASSWORD_RESET_SUCCESS', language);
       } else {
-        res.status(500).json({
-          status: 'error',
-          message: 'Failed to reset password. Please try again.'
-        });
+        return sendResponse(res, 500, 'error', 'PASSWORD_RESET_FAILED', language);
       }
     } catch (error) {
       next(error);
@@ -623,12 +561,11 @@ const userController = {
  */
 const updateProfileImage = async (req, res, next) => {
   try {
+    const language = getLanguageFromRequest(req);
+    
     // Check if file was uploaded
     if (!req.file) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'No image file provided'
-      });
+      return sendResponse(res, 400, 'error', 'NO_IMAGE_PROVIDED', language);
     }
 
     // Upload to Cloudinary with user-specific folder
@@ -655,9 +592,8 @@ const updateProfileImage = async (req, res, next) => {
     const userData = { profile_image: cloudinaryResult.secure_url };
     const updatedUser = await userModel.update(req.user.id, userData);
 
-    res.status(200).json({
-      status: 'success',
-      data: updatedUser
+    return sendResponse(res, 200, 'success', 'PROFILE_IMAGE_UPDATED', language, {
+      profile_image: cloudinaryResult.secure_url
     });
   } catch (error) {
     // Delete uploaded file if there was an error
