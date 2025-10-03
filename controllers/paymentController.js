@@ -392,13 +392,20 @@ const paymentController = {
 
       // Parse metadata if available
       let parsedMetadata = {};
+      console.log('Raw metadata received:', metadata, 'Type:', typeof metadata);
       if (metadata) {
         try {
-          parsedMetadata = JSON.parse(metadata);
+          if (typeof metadata === 'string') {
+            parsedMetadata = JSON.parse(metadata);
+          } else if (typeof metadata === 'object') {
+            parsedMetadata = metadata;
+          }
           console.log('Parsed metadata:', parsedMetadata);
         } catch (error) {
           console.log('Error parsing metadata:', error);
         }
+      } else {
+        console.log('No metadata found in webhook payload');
       }
 
       console.log('Extracted webhook data:', {
@@ -477,17 +484,35 @@ const paymentController = {
         
         // Try to parse metadata for booking information
         let bookingMetadata = null;
+        console.log('Attempting to extract booking metadata from:', {
+          metadata: metadata,
+          parsedMetadata: parsedMetadata,
+          metadataType: typeof metadata,
+          parsedMetadataType: typeof parsedMetadata
+        });
+        
         try {
           if (metadata && typeof metadata === 'string') {
             bookingMetadata = JSON.parse(metadata);
           } else if (metadata && typeof metadata === 'object') {
             bookingMetadata = metadata;
+          } else if (parsedMetadata && Object.keys(parsedMetadata).length > 0) {
+            bookingMetadata = parsedMetadata;
           }
+          
+          console.log('Extracted booking metadata:', bookingMetadata);
         } catch (error) {
           console.log('Could not parse metadata:', error);
         }
         
         // If we have booking metadata and payment is successful, create the booking
+        console.log('Checking booking metadata conditions:', {
+          hasBookingMetadata: !!bookingMetadata,
+          hasBookingData: !!(bookingMetadata && bookingMetadata.booking_data),
+          internalStatus: internalStatus,
+          isSuccessfulPayment: (internalStatus === 'deposit_paid' || internalStatus === 'fully_paid')
+        });
+        
         if (bookingMetadata && bookingMetadata.booking_data && (internalStatus === 'deposit_paid' || internalStatus === 'fully_paid')) {
           console.log('Creating booking from webhook metadata for successful payment');
           
