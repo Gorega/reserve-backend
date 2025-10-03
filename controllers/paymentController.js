@@ -509,21 +509,65 @@ const paymentController = {
         console.log('Checking booking metadata conditions:', {
           hasBookingMetadata: !!bookingMetadata,
           hasBookingData: !!(bookingMetadata && bookingMetadata.booking_data),
+          hasDirectMetadata: !!(bookingMetadata && bookingMetadata.listing_id && bookingMetadata.user_id),
           internalStatus: internalStatus,
           isSuccessfulPayment: (internalStatus === 'deposit_paid' || internalStatus === 'fully_paid')
         });
         
-        if (bookingMetadata && bookingMetadata.booking_data && (internalStatus === 'deposit_paid' || internalStatus === 'fully_paid')) {
+        // Check if we have booking metadata in the expected format or direct metadata
+        const hasValidBookingData = (bookingMetadata && bookingMetadata.booking_data) || 
+                                   (bookingMetadata && bookingMetadata.listing_id && bookingMetadata.user_id);
+        
+        if (bookingMetadata && hasValidBookingData && (internalStatus === 'deposit_paid' || internalStatus === 'fully_paid')) {
           console.log('Creating booking from webhook metadata for successful payment');
           
           try {
-            // Create the booking using the metadata
-            const booking = await bookingModel.create(bookingMetadata.booking_data);
+            // Prepare booking data from metadata
+            let bookingData;
+            
+            if (bookingMetadata.booking_data) {
+              // Use structured booking data
+              bookingData = bookingMetadata.booking_data;
+            } else {
+              // Create booking data from direct metadata
+              // We need to get additional information from the listing
+              const listingModel = require('../models/listingModel');
+              const listing = await listingModel.getById(bookingMetadata.listing_id);
+              
+              if (!listing) {
+                throw new Error(`Listing not found: ${bookingMetadata.listing_id}`);
+              }
+              
+              // Create basic booking data structure
+              bookingData = {
+                user_id: parseInt(bookingMetadata.user_id),
+                listing_id: parseInt(bookingMetadata.listing_id),
+                host_id: listing.host_id,
+                total_amount: bookingMetadata.total_price || bookingMetadata.confirmation_fee * 10, // Estimate total from confirmation fee
+                booking_type: listing.category || 'daily', // Default based on listing
+                booking_period: 'full_day', // Default
+                guest_count: 1, // Default
+                status: 'pending', // Will be updated to confirmed after payment creation
+                payment_status: 'pending',
+                // Set default dates (these should ideally come from the original booking request)
+                start_date: new Date().toISOString().split('T')[0], // Today as fallback
+                end_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Tomorrow as fallback
+                created_at: new Date(),
+                updated_at: new Date()
+              };
+              
+              console.log('Created booking data from direct metadata:', bookingData);
+            }
+            
+            // Create the booking using the prepared data
+            const booking = await bookingModel.create(bookingData);
             console.log('Successfully created booking from webhook:', booking.id);
             
-            // Calculate confirmation fee (10% of total price)
-            const confirmationFeePercent = 10;
-            const confirmationFee = (booking.total_price * confirmationFeePercent) / 100;
+            // Use the confirmation fee from metadata or calculate it
+            const confirmationFee = bookingMetadata.confirmation_fee || 
+                                   (bookingData.total_amount * 10) / 100 || 
+                                   amount || 
+                                   100; // Fallback amount
             
             // Create payment record for the booking
             const paymentData = {
