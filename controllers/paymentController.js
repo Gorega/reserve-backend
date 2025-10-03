@@ -1,5 +1,6 @@
 const paymentModel = require('../models/paymentModel');
 const bookingModel = require('../models/bookingModel');
+const lahzaService = require('../utils/lahzaService');
 const { serverError, notFound, badRequest } = require('../utils/errorHandler');
 
 /**
@@ -470,14 +471,89 @@ const paymentController = {
         }
       }
 
-      // If still not found, this might be a direct payment without pre-created record
+      // If still not found, check if we have booking metadata to create the booking
       if (!payment) {
-        console.log('Payment record not found, webhook might be for direct payment');
+        console.log('Payment record not found, checking for booking metadata');
         
-        // For now, just acknowledge the webhook
+        // Try to parse metadata for booking information
+        let bookingMetadata = null;
+        try {
+          if (metadata && typeof metadata === 'string') {
+            bookingMetadata = JSON.parse(metadata);
+          } else if (metadata && typeof metadata === 'object') {
+            bookingMetadata = metadata;
+          }
+        } catch (error) {
+          console.log('Could not parse metadata:', error);
+        }
+        
+        // If we have booking metadata and payment is successful, create the booking
+        if (bookingMetadata && bookingMetadata.booking_data && (internalStatus === 'deposit_paid' || internalStatus === 'fully_paid')) {
+          console.log('Creating booking from webhook metadata for successful payment');
+          
+          try {
+            // Create the booking using the metadata
+            const booking = await bookingModel.create(bookingMetadata.booking_data);
+            console.log('Successfully created booking from webhook:', booking.id);
+            
+            // Calculate confirmation fee (10% of total price)
+            const confirmationFeePercent = 10;
+            const confirmationFee = (booking.total_price * confirmationFeePercent) / 100;
+            
+            // Create payment record for the booking
+            const paymentData = {
+              booking_id: booking.id,
+              method: 'card',
+              amount: confirmationFee,
+              deposit_amount: confirmationFee,
+              remaining_amount: booking.total_price - confirmationFee,
+              status: internalStatus,
+              transaction_id: transaction_id || reference,
+              lahza_reference: reference,
+              lahza_access_code: access_code,
+              currency: currency || 'SAR',
+              payment_method: payment_method || 'card',
+              paid_at: paid_at ? new Date(paid_at) : new Date()
+            };
+            
+            const createdPayment = await paymentModel.create(paymentData);
+            console.log('Created payment record for webhook booking:', createdPayment.id);
+            
+            // Update booking status to confirmed
+            await bookingModel.update(booking.id, {
+              payment_status: internalStatus,
+              status: 'confirmed',
+              auto_cancel_at: null
+            });
+            
+            return res.status(200).json({
+              status: 'success',
+              message: 'Booking created from webhook metadata',
+              data: {
+                booking_id: booking.id,
+                payment_id: createdPayment.id,
+                status: internalStatus,
+                reference: reference
+              }
+            });
+            
+          } catch (bookingError) {
+            console.error('Error creating booking from webhook metadata:', bookingError);
+            
+            // Still acknowledge the webhook to prevent retries
+            return res.status(200).json({
+              status: 'error',
+              message: 'Failed to create booking from webhook metadata',
+              error: bookingError.message
+            });
+          }
+        }
+        
+        // If no metadata or payment failed, just acknowledge the webhook
+        console.log('No booking metadata found or payment not successful');
         return res.status(200).json({
           status: 'success',
-          message: 'Webhook received but no matching payment record found'
+          message: 'Webhook received but no matching payment record or booking metadata found'
         });
       }
 
@@ -568,6 +644,92 @@ const paymentController = {
     } catch (error) {
       next(error);
     }
+  }
+};
+
+// Initialize Lahza payment with booking metadata
+paymentController.initializeLahzaPayment = async (req, res) => {
+  try {
+    const { booking_id } = req.params;
+    const { 
+      amount, 
+      email, 
+      first_name, 
+      last_name, 
+      mobile, 
+      callback_url,
+      currency = 'SAR'
+    } = req.body;
+
+    // Get booking details
+    const booking = await bookingModel.getById(booking_id);
+    if (!booking) {
+      return notFound(res, 'Booking not found');
+    }
+
+    // Check if user is authorized to pay for this booking
+    if (booking.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    // Generate unique reference
+    const reference = lahzaService.generatePaymentReference(booking_id, req.user.id);
+
+    // Prepare booking metadata for Lahza
+    const bookingMetadata = {
+      booking_id: booking.id,
+      user_id: booking.user_id,
+      listing_id: booking.listing_id,
+      host_id: booking.host_id,
+      start_date: booking.start_date,
+      end_date: booking.end_date,
+      start_time: booking.start_time,
+      end_time: booking.end_time,
+      booking_type: booking.booking_type,
+      booking_period: booking.booking_period,
+      total_amount: booking.total_amount,
+      guest_count: booking.guest_count,
+      special_requests: booking.special_requests,
+      status: booking.status
+    };
+
+    // Initialize Lahza payment with metadata
+    const lahzaResponse = await lahzaService.initializePayment({
+      amount,
+      email,
+      currency,
+      reference,
+      callback_url,
+      first_name,
+      last_name,
+      mobile
+    }, bookingMetadata);
+
+    // Create payment record
+    const paymentData = {
+      booking_id: booking.id,
+      user_id: req.user.id,
+      method: 'card',
+      amount: amount,
+      deposit_amount: amount,
+      remaining_amount: 0,
+      status: 'pending',
+      payment_deadline: new Date(Date.now() + 12 * 60 * 60 * 1000), // 12 hours
+      lahza_reference: reference
+    };
+
+    const payment = await paymentModel.create(paymentData);
+
+    res.json({
+      success: true,
+      payment_id: payment.id,
+      lahza_response: lahzaResponse,
+      reference: reference
+    });
+
+  } catch (error) {
+    console.error('Error initializing Lahza payment:', error);
+    return serverError(res, 'Failed to initialize payment');
   }
 };
 

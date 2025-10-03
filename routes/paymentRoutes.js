@@ -14,6 +14,7 @@ router.use(authMiddleware.protect);
 
 // Routes for user payments
 router.post('/', paymentController.create);
+router.post('/lahza/:booking_id', paymentController.initializeLahzaPayment);
 router.get('/my-payments', paymentController.getUserPayments);
 router.get('/host-payments', paymentController.getHostPayments);
 router.get('/:id', paymentController.getById);
