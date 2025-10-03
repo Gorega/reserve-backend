@@ -484,7 +484,7 @@ const paymentController = {
       console.log('Found payment record:', payment.id);
 
       // Update payment data
-      const paymentData = {
+      const updateData = {
         status: internalStatus,
         transaction_id: transaction_id || reference,
         lahza_reference: reference,
@@ -496,13 +496,13 @@ const paymentController = {
 
       // If payment is completed, set paid_at timestamp
       if (internalStatus === 'deposit_paid' || internalStatus === 'fully_paid') {
-        paymentData.paid_at = paid_at ? new Date(paid_at) : new Date();
+        updateData.paid_at = paid_at ? new Date(paid_at) : new Date();
       }
 
-      console.log('Updating payment with data:', paymentData);
+      console.log('Updating payment with data:', updateData);
 
       // Update payment
-      const updatedPayment = await paymentModel.update(payment.id, paymentData);
+      const updatedPayment = await paymentModel.update(payment.id, updateData);
 
       // Update booking payment status if payment is linked to a booking
       if (payment.booking_id) {
