@@ -362,27 +362,56 @@ const paymentController = {
       }
       
       // Extract relevant data from Lahza webhook
-      // Lahza typically sends: reference, status, amount, etc.
+      // Lahza sends data in a nested structure: { data: { ... }, event: '...' }
+      const paymentData = webhookData.data || webhookData;
+      const event = webhookData.event;
+      
+      console.log('Payment data extracted:', paymentData);
+      console.log('Event type:', event);
+      
       const {
         reference,
         status,
         amount,
-        transaction_id,
-        access_code,
-        customer_email,
-        customer_phone,
-        payment_method,
+        id: transaction_id,
+        gateway_response,
+        customer,
+        authorization,
         currency,
-        created_at,
-        paid_at
-      } = webhookData;
+        createdAt: created_at,
+        paidAt: paid_at,
+        metadata,
+        fees,
+        channel: payment_method
+      } = paymentData;
+
+      // Extract customer information if available
+      const customer_email = customer?.email;
+      const customer_phone = customer?.phone;
+
+      // Parse metadata if available
+      let parsedMetadata = {};
+      if (metadata) {
+        try {
+          parsedMetadata = JSON.parse(metadata);
+          console.log('Parsed metadata:', parsedMetadata);
+        } catch (error) {
+          console.log('Error parsing metadata:', error);
+        }
+      }
 
       console.log('Extracted webhook data:', {
         reference,
         status,
         amount,
         transaction_id,
-        access_code
+        gateway_response,
+        customer_email,
+        customer_phone,
+        payment_method,
+        currency,
+        event,
+        metadata: parsedMetadata
       });
 
       // Validate required fields
