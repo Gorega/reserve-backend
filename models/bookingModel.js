@@ -1304,14 +1304,8 @@ const bookingModel = {
       // For day/night unit types, get availability for the selected date
       const availabilityQuery = `
         SELECT 
-          CASE 
-            WHEN start_datetime IS NOT NULL THEN start_datetime
-            ELSE CONCAT(date, ' ', start_time)
-          END as unified_start_datetime,
-          CASE 
-            WHEN end_datetime IS NOT NULL THEN end_datetime
-            ELSE CONCAT(COALESCE(end_date, date), ' ', end_time)
-          END as unified_end_datetime,
+          CONCAT(date, ' ', start_time) as unified_start_datetime,
+          CONCAT(COALESCE(end_date, date), ' ', end_time) as unified_end_datetime,
           is_overnight
         FROM availability 
         WHERE listing_id = ? 
