@@ -185,7 +185,7 @@ const paymentModel = {
         JOIN users u ON b.user_id = u.id
         JOIN listings l ON b.listing_id = l.id
         LEFT JOIN payment_locations pl ON p.payment_location_id = pl.id
-        WHERE p.reference = ?
+        WHERE p.lahza_reference = ?
       `;
       
       const payments = await db.query(query, [reference]);
