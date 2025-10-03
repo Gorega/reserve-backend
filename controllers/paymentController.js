@@ -538,26 +538,55 @@ const paymentController = {
                 throw new Error(`Listing not found: ${bookingMetadata.listing_id}`);
               }
               
+              // Extract dates from metadata if available
+              let startDate, endDate, bookingPeriod = 'full_day';
+              
+              if (bookingMetadata.selected_date) {
+                startDate = bookingMetadata.selected_date;
+                endDate = bookingMetadata.end_date || startDate; // Same day if no end date
+              } else if (bookingMetadata.start_date) {
+                startDate = bookingMetadata.start_date;
+                endDate = bookingMetadata.end_date || startDate;
+              } else {
+                // Fallback to current date
+                startDate = new Date().toISOString().split('T')[0];
+                endDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+              }
+              
+              // Extract booking period if available
+              if (bookingMetadata.booking_period) {
+                bookingPeriod = bookingMetadata.booking_period;
+              } else if (bookingMetadata.period) {
+                bookingPeriod = bookingMetadata.period;
+              }
+              
               // Create basic booking data structure
               bookingData = {
                 user_id: parseInt(bookingMetadata.user_id),
                 listing_id: parseInt(bookingMetadata.listing_id),
                 host_id: listing.host_id,
                 total_amount: bookingMetadata.total_price || bookingMetadata.confirmation_fee * 10, // Estimate total from confirmation fee
-                booking_type: listing.category || 'daily', // Default based on listing
-                booking_period: 'full_day', // Default
-                guest_count: 1, // Default
+                booking_type: bookingMetadata.booking_type || listing.category || 'daily', // Use metadata or default based on listing
+                booking_period: bookingPeriod,
+                guest_count: bookingMetadata.guest_count || bookingMetadata.guests_count || 1, // Default
                 status: 'pending', // Will be updated to confirmed after payment creation
                 payment_status: 'pending',
-                // Set default dates (these should ideally come from the original booking request)
-                start_date: new Date().toISOString().split('T')[0], // Today as fallback
-                end_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Tomorrow as fallback
+                selected_date: startDate, // This is important for determineBookingTimes
+                start_date: startDate,
+                end_date: endDate,
+                // Include datetime fields if available in metadata
+                start_datetime: bookingMetadata.start_datetime,
+                end_datetime: bookingMetadata.end_datetime,
                 created_at: new Date(),
                 updated_at: new Date()
               };
               
               console.log('Created booking data from direct metadata:', bookingData);
             }
+            
+            // Add webhook flag to indicate this is a webhook-created booking
+            bookingData.is_webhook_booking = true;
+            bookingData.source = 'webhook';
             
             // Create the booking using the prepared data
             const booking = await bookingModel.create(bookingData);

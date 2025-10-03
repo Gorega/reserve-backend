@@ -254,7 +254,8 @@ const bookingModel = {
       // For day/night bookings, automatically determine times if not provided
       // Only use determineBookingTimes if start_datetime and end_datetime are NOT provided
       if ((booking_type === 'daily' || booking_type === 'night') && booking_period && (!start_datetime || !end_datetime)) {
-        const bookingTimes = await this.determineBookingTimes(listing_id, selected_date, booking_period);
+        const isWebhookBooking = bookingData.is_webhook_booking || bookingData.source === 'webhook';
+        const bookingTimes = await this.determineBookingTimes(listing_id, selected_date, booking_period, isWebhookBooking);
         
         // Check if bookingTimes is not null before accessing its properties
         if (bookingTimes && bookingTimes.start_datetime && bookingTimes.end_datetime) {
@@ -291,8 +292,17 @@ const bookingModel = {
         availabilityCheck = await this.checkAvailability(listing_id, finalStartDatetime, finalEndDatetime, booking_type, booking_period);
       }
       
+      // For webhook bookings, be more lenient with availability checks
+      const isWebhookBooking = bookingData.is_webhook_booking || bookingData.source === 'webhook';
+      
       if (!availabilityCheck.available) {
-        throw badRequest(`Booking not available: ${availabilityCheck.reason}`);
+        if (isWebhookBooking) {
+          console.log(`Webhook booking: Proceeding despite availability issue: ${availabilityCheck.reason}`);
+          // For webhook bookings, we'll proceed but log the issue
+          // This allows payment-confirmed bookings to be created even if availability records are missing
+        } else {
+          throw badRequest(`Booking not available: ${availabilityCheck.reason}`);
+        }
       }
       
       // If we're booking a night slot but found a daily slot, adjust the booking_type
@@ -1279,7 +1289,7 @@ const bookingModel = {
    * @param {string} booking_period - 'morning', 'night', or 'day' for day/night listings
    * @returns {Promise<Object>} - Start and end datetime
    */
-  async determineBookingTimes(listing_id, selected_date, booking_period = null) {
+  async determineBookingTimes(listing_id, selected_date, booking_period = null, isWebhookBooking = false) {
     try {
       // Get listing details to determine unit type
       const listingQuery = `
@@ -1320,7 +1330,37 @@ const bookingModel = {
       const availability = await db.query(availabilityQuery, [listing_id, selected_date, selected_date]);
       
       if (availability.length === 0) {
-        throw badRequest('No availability found for the selected date');
+        const bookingSource = isWebhookBooking ? ' (webhook booking)' : '';
+        console.log(`No availability records found for listing ${listing_id} on ${selected_date}${bookingSource}, using fallback times`);
+        
+        // Fallback logic: provide default times based on booking_period and unit_type
+        let defaultStartTime, defaultEndTime;
+        
+        if (booking_period === 'morning' || booking_period === 'day') {
+          defaultStartTime = '09:00:00'; // 9 AM
+          defaultEndTime = listing.unit_type === 'night' ? '09:00:00' : '18:00:00'; // 6 PM for day, 9 AM next day for night
+        } else if (booking_period === 'night') {
+          defaultStartTime = '18:00:00'; // 6 PM
+          defaultEndTime = '09:00:00'; // 9 AM next day
+        } else {
+          // Default fallback
+          defaultStartTime = listing.unit_type === 'night' ? '18:00:00' : '09:00:00';
+          defaultEndTime = listing.unit_type === 'night' ? '09:00:00' : '18:00:00';
+        }
+        
+        // Calculate end date for overnight bookings
+        let endDate = selected_date;
+        if (booking_period === 'night' || (listing.unit_type === 'night' && defaultEndTime <= defaultStartTime)) {
+          // Add one day for overnight bookings
+          const nextDay = new Date(selected_date);
+          nextDay.setDate(nextDay.getDate() + 1);
+          endDate = nextDay.toISOString().split('T')[0];
+        }
+        
+        return {
+          start_datetime: `${selected_date} ${defaultStartTime}`,
+          end_datetime: `${endDate} ${defaultEndTime}`
+        };
       }
       
       // Determine which availability slot to use based on booking_period
