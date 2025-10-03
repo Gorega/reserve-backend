@@ -6,6 +6,7 @@ const router = express.Router();
 
 // Public routes
 router.post('/webhook', paymentController.processPayment); // Webhook route (no auth required)
+router.get('/webhook', paymentController.processPayment); // Webhook route for GET requests (no auth required)
 router.get('/locations', paymentController.getPaymentLocations); // Get payment locations
 
 // Protect all routes after this middleware
@@ -22,4 +23,4 @@ router.use(authMiddleware.restrictTo('admin'));
 router.get('/', paymentController.getAll);
 router.patch('/:id/status', paymentController.updateStatus);
 
-module.exports = router; 
+module.exports = router;

@@ -170,6 +170,60 @@ const paymentModel = {
   },
   
   /**
+   * Get payment by reference
+   * @param {string} reference - Payment reference
+   * @returns {Promise<Object|null>} - Payment object or null if not found
+   */
+  async getByReference(reference) {
+    try {
+      const query = `
+        SELECT p.*, b.start_datetime, b.end_datetime, 
+               u.name as user_name, l.title as listing_title,
+               pl.name as payment_location_name, pl.address as payment_location_address
+        FROM payments p
+        JOIN bookings b ON p.booking_id = b.id
+        JOIN users u ON b.user_id = u.id
+        JOIN listings l ON b.listing_id = l.id
+        LEFT JOIN payment_locations pl ON p.payment_location_id = pl.id
+        WHERE p.reference = ?
+      `;
+      
+      const payments = await db.query(query, [reference]);
+      return payments.length > 0 ? payments[0] : null;
+    } catch (error) {
+      console.error('Error getting payment by reference:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get payment by transaction ID
+   * @param {string} transactionId - Transaction ID
+   * @returns {Promise<Object|null>} - Payment object or null if not found
+   */
+  async getByTransactionId(transactionId) {
+    try {
+      const query = `
+        SELECT p.*, b.start_datetime, b.end_datetime, 
+               u.name as user_name, l.title as listing_title,
+               pl.name as payment_location_name, pl.address as payment_location_address
+        FROM payments p
+        JOIN bookings b ON p.booking_id = b.id
+        JOIN users u ON b.user_id = u.id
+        JOIN listings l ON b.listing_id = l.id
+        LEFT JOIN payment_locations pl ON p.payment_location_id = pl.id
+        WHERE p.transaction_id = ?
+      `;
+      
+      const payments = await db.query(query, [transactionId]);
+      return payments.length > 0 ? payments[0] : null;
+    } catch (error) {
+      console.error('Error getting payment by transaction ID:', error);
+      throw error;
+    }
+  },
+
+  /**
    * Get payment locations
    * @returns {Promise<Array>} - List of payment locations
    */
@@ -188,4 +242,4 @@ const paymentModel = {
   }
 };
 
-module.exports = paymentModel; 
+module.exports = paymentModel;

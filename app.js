@@ -91,6 +91,26 @@ app.use(cors({
   origin: corsOptions.origin,
   credentials: true // Allow cookies to be sent with requests
 })); // Enable CORS
+
+// Middleware to capture raw body for webhook signature verification
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }), (req, res, next) => {
+  // Store raw body for signature verification
+  if (Buffer.isBuffer(req.body)) {
+    req.rawBody = req.body.toString('utf8');
+    // Parse JSON body manually for webhook processing
+    try {
+      req.body = JSON.parse(req.rawBody);
+    } catch (error) {
+      console.error('Error parsing webhook JSON:', error);
+      req.body = {};
+    }
+  } else {
+    // If body is already parsed, convert it back to string for rawBody
+    req.rawBody = JSON.stringify(req.body);
+  }
+  next();
+});
+
 app.use(express.json()); // Parse JSON request bodies
 app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
 app.use(cookieParser()); // Parse cookies
