@@ -378,6 +378,7 @@ const paymentController = {
         gateway_response,
         customer,
         authorization,
+        access_code,
         currency,
         createdAt: created_at,
         paidAt: paid_at,
@@ -565,21 +566,24 @@ const paymentController = {
                 user_id: parseInt(bookingMetadata.user_id),
                 listing_id: parseInt(bookingMetadata.listing_id),
                 host_id: listing.host_id,
-                total_amount: bookingMetadata.total_price || bookingMetadata.confirmation_fee * 10, // Estimate total from confirmation fee
+                total_price: bookingMetadata.total_price || bookingMetadata.confirmation_fee * 10, // Estimate total from confirmation fee
                 booking_type: bookingMetadata.booking_type || listing.category || 'daily', // Use metadata or default based on listing
                 booking_period: bookingPeriod,
-                guest_count: bookingMetadata.guest_count || bookingMetadata.guests_count || 1, // Default
-                status: 'pending', // Will be updated to confirmed after payment creation
-                payment_status: 'unpaid', // Will be updated after payment creation
+                guests_count: bookingMetadata.guest_count || bookingMetadata.guests_count || 1, // Default
+                status: internalStatus === 'deposit_paid' ? 'confirmed' : 'pending',
+                payment_status: internalStatus, // Use the mapped status from webhook
                 selected_date: startDate, // This is important for determineBookingTimes
                 start_date: startDate,
-                end_date: endDate,
-                // Include datetime fields if available in metadata
-                start_datetime: bookingMetadata.start_datetime,
-                end_datetime: bookingMetadata.end_datetime,
-                created_at: new Date(),
-                updated_at: new Date()
+                end_date: endDate
               };
+              
+              // Only include datetime fields if they're actually provided in metadata
+              if (bookingMetadata.start_datetime) {
+                bookingData.start_datetime = bookingMetadata.start_datetime;
+              }
+              if (bookingMetadata.end_datetime) {
+                bookingData.end_datetime = bookingMetadata.end_datetime;
+              }
               
               console.log('Created booking data from direct metadata:', bookingData);
             }
