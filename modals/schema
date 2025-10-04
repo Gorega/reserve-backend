@@ -186,7 +186,6 @@ CREATE TABLE payments (
     lahza_reference VARCHAR(255),
     lahza_access_code VARCHAR(255),
     currency VARCHAR(10) DEFAULT 'ILS',
-    payment_method VARCHAR(50),
     paid_at TIMESTAMP NULL,
     FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
 );

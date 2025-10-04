@@ -574,7 +574,9 @@ const paymentController = {
                 payment_status: internalStatus, // Use the mapped status from webhook
                 selected_date: startDate, // This is important for determineBookingTimes
                 start_date: startDate,
-                end_date: endDate
+                end_date: endDate,
+                notes: `Booking created via Lahza payment webhook. Reference: ${reference}${access_code ? `, Access Code: ${access_code}` : ''}`,
+                payment_method: 'card' // This will trigger automatic payment record creation in booking model
               };
               
               // Only include datetime fields if they're actually provided in metadata
@@ -596,30 +598,31 @@ const paymentController = {
             const booking = await bookingModel.create(bookingData);
             console.log('Successfully created booking from webhook:', booking.id);
             
-            // Use the confirmation fee from metadata or calculate it
-            const confirmationFee = bookingMetadata.confirmation_fee || 
-                                   (bookingData.total_amount * 10) / 100 || 
-                                   amount || 
-                                   100; // Fallback amount
+            // The booking model automatically created a payment record
+            // Now update it with Lahza-specific fields
+            const [payments] = await db.query(
+              'SELECT id FROM payments WHERE booking_id = ? ORDER BY created_at DESC LIMIT 1',
+              [booking.id]
+            );
             
-            // Create payment record for the booking
-            const paymentData = {
-              booking_id: booking.id,
-              method: 'card',
-              amount: confirmationFee,
-              deposit_amount: confirmationFee,
-              remaining_amount: booking.total_price - confirmationFee,
-              status: internalStatus,
-              transaction_id: transaction_id || reference,
-              lahza_reference: reference,
-              lahza_access_code: access_code,
-              currency: currency || 'SAR',
-              payment_method: payment_method || 'card',
-              paid_at: paid_at ? new Date(paid_at) : new Date()
-            };
-            
-            const createdPayment = await paymentModel.create(paymentData);
-            console.log('Created payment record for webhook booking:', createdPayment.id);
+            if (payments.length > 0) {
+              const paymentId = payments[0].id;
+              
+              // Update the payment record with Lahza-specific fields
+              await db.query(
+                'UPDATE payments SET transaction_id = ?, lahza_reference = ?, lahza_access_code = ?, currency = ?, paid_at = ? WHERE id = ?',
+                [
+                  transaction_id || reference,
+                  reference,
+                  access_code,
+                  currency || 'SAR',
+                  paid_at ? new Date(paid_at) : new Date(),
+                  paymentId
+                ]
+              );
+              
+              console.log('Updated payment record with Lahza fields for booking:', booking.id);
+            }
             
             // Update booking status to confirmed
             await bookingModel.update(booking.id, {
@@ -633,7 +636,7 @@ const paymentController = {
               message: 'Booking created from webhook metadata',
               data: {
                 booking_id: booking.id,
-                payment_id: createdPayment.id,
+                payment_id: payments.length > 0 ? payments[0].id : null,
                 status: internalStatus,
                 reference: reference
               }
