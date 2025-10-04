@@ -620,7 +620,7 @@ const paymentController = {
             // The booking model automatically created a payment record
             // Now update it with Lahza-specific fields
             const [payments] = await db.query(
-              'SELECT id FROM payments WHERE booking_id = ? ORDER BY created_at DESC LIMIT 1',
+              'SELECT id FROM payments WHERE booking_id = ? ORDER BY id DESC LIMIT 1',
               [booking.id]
             );
             
