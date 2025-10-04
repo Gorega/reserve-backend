@@ -2,6 +2,7 @@ const paymentModel = require('../models/paymentModel');
 const bookingModel = require('../models/bookingModel');
 const lahzaService = require('../utils/lahzaService');
 const { serverError, notFound, badRequest } = require('../utils/errorHandler');
+const db = require('../config/database');
 
 /**
  * Payment Controller
