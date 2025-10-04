@@ -529,6 +529,17 @@ const paymentController = {
             if (bookingMetadata.booking_data) {
               // Use structured booking data
               bookingData = bookingMetadata.booking_data;
+              
+              // Ensure datetime fields are properly combined if they're separate
+              if (!bookingData.start_datetime && bookingData.start_date && bookingData.start_time) {
+                bookingData.start_datetime = `${bookingData.start_date} ${bookingData.start_time}`;
+                console.log(`Combined start_datetime from booking_data: ${bookingData.start_datetime}`);
+              }
+              
+              if (!bookingData.end_datetime && bookingData.end_date && bookingData.end_time) {
+                bookingData.end_datetime = `${bookingData.end_date} ${bookingData.end_time}`;
+                console.log(`Combined end_datetime from booking_data: ${bookingData.end_datetime}`);
+              }
             } else {
               // Create booking data from direct metadata
               // We need to get additional information from the listing
@@ -579,11 +590,18 @@ const paymentController = {
                 payment_method: 'card' // This will trigger automatic payment record creation in booking model
               };
               
-              // Only include datetime fields if they're actually provided in metadata
-              if (bookingMetadata.start_datetime) {
+              // Combine date and time fields from metadata to create proper datetime fields
+              if (bookingMetadata.start_date && bookingMetadata.start_time) {
+                bookingData.start_datetime = `${bookingMetadata.start_date} ${bookingMetadata.start_time}`;
+                console.log(`Combined start_datetime: ${bookingData.start_datetime}`);
+              } else if (bookingMetadata.start_datetime) {
                 bookingData.start_datetime = bookingMetadata.start_datetime;
               }
-              if (bookingMetadata.end_datetime) {
+              
+              if (bookingMetadata.end_date && bookingMetadata.end_time) {
+                bookingData.end_datetime = `${bookingMetadata.end_date} ${bookingMetadata.end_time}`;
+                console.log(`Combined end_datetime: ${bookingData.end_datetime}`);
+              } else if (bookingMetadata.end_datetime) {
                 bookingData.end_datetime = bookingMetadata.end_datetime;
               }
               
