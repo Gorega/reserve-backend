@@ -251,16 +251,24 @@ const bookingModel = {
       let finalStartDatetime = start_datetime;
       let finalEndDatetime = end_datetime;
       
+      console.log(`DEBUG: Initial datetime values - start: ${start_datetime}, end: ${end_datetime}`);
+      console.log(`DEBUG: Booking type: ${booking_type}, period: ${booking_period}`);
+      console.log(`DEBUG: Condition check: ${(booking_type === 'daily' || booking_type === 'night') && booking_period && (!start_datetime || !end_datetime)}`);
+      
       // For day/night bookings, automatically determine times if not provided
       // Only use determineBookingTimes if start_datetime and end_datetime are NOT provided
       if ((booking_type === 'daily' || booking_type === 'night') && booking_period && (!start_datetime || !end_datetime)) {
         const isWebhookBooking = bookingData.is_webhook_booking || bookingData.source === 'webhook';
+        console.log(`DEBUG: Calling determineBookingTimes for listing ${listing_id}, date ${selected_date}, period ${booking_period}, webhook: ${isWebhookBooking}`);
+        
         const bookingTimes = await this.determineBookingTimes(listing_id, selected_date, booking_period, isWebhookBooking);
+        console.log(`DEBUG: determineBookingTimes returned:`, bookingTimes);
         
         // Check if bookingTimes is not null before accessing its properties
         if (bookingTimes && bookingTimes.start_datetime && bookingTimes.end_datetime) {
           finalStartDatetime = bookingTimes.start_datetime;
           finalEndDatetime = bookingTimes.end_datetime;
+          console.log(`DEBUG: Updated datetime values - start: ${finalStartDatetime}, end: ${finalEndDatetime}`);
         } else {
           console.log(`Using provided start/end times as determineBookingTimes returned null or incomplete data`);
           // Keep the original values if bookingTimes is null or incomplete
@@ -1328,6 +1336,7 @@ const bookingModel = {
       `;
       
       const availability = await db.query(availabilityQuery, [listing_id, selected_date, selected_date]);
+      console.log(`DEBUG: Availability query returned ${availability.length} records:`, availability);
       
       if (availability.length === 0) {
         const bookingSource = isWebhookBooking ? ' (webhook booking)' : '';
@@ -1357,10 +1366,13 @@ const bookingModel = {
           endDate = nextDay.toISOString().split('T')[0];
         }
         
-        return {
+        const fallbackResult = {
           start_datetime: `${selected_date} ${defaultStartTime}`,
           end_datetime: `${endDate} ${defaultEndTime}`
         };
+        
+        console.log(`DEBUG: determineBookingTimes returning fallback times:`, fallbackResult);
+        return fallbackResult;
       }
       
       // Determine which availability slot to use based on booking_period
@@ -1385,10 +1397,13 @@ const bookingModel = {
         selectedSlot = availability[0];
       }
       
-      return {
+      const result = {
         start_datetime: selectedSlot.unified_start_datetime,
         end_datetime: selectedSlot.unified_end_datetime
       };
+      
+      console.log(`DEBUG: determineBookingTimes returning:`, result);
+      return result;
       
     } catch (error) {
       console.error('Error determining booking times:', error);
