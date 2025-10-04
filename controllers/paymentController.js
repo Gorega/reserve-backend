@@ -543,7 +543,52 @@ const paymentController = {
               }
             } else {
               // Create booking data from direct metadata
-              // We need to get additional information from the listing
+              // First, check if there's an existing booking for this payment reference
+              let existingBooking = null;
+              
+              try {
+                // Try to find existing booking by reference or user/listing combination
+                const bookingModel = require('../models/bookingModel');
+                
+                // Look for existing bookings with this reference in notes
+                const pool = await db.getPool();
+                const [existingBookings] = await pool.execute(
+                  'SELECT * FROM bookings WHERE notes LIKE ? AND user_id = ? AND listing_id = ? ORDER BY created_at DESC LIMIT 1',
+                  [`%${reference}%`, bookingMetadata.user_id, bookingMetadata.listing_id]
+                );
+                
+                if (existingBookings.length > 0) {
+                  existingBooking = existingBookings[0];
+                  console.log('Found existing booking with reference:', existingBooking.id);
+                }
+              } catch (error) {
+                console.log('Could not find existing booking:', error.message);
+              }
+              
+              // If we found an existing booking, use its datetime information
+              if (existingBooking) {
+                console.log('Using datetime from existing booking:', {
+                  start_datetime: existingBooking.start_datetime,
+                  end_datetime: existingBooking.end_datetime
+                });
+                
+                // Update the existing booking's payment status instead of creating a new one
+                const bookingModel = require('../models/bookingModel');
+                await bookingModel.update(existingBooking.id, {
+                  payment_status: internalStatus,
+                  status: internalStatus === 'deposit_paid' ? 'confirmed' : existingBooking.status
+                });
+                
+                console.log(`Updated existing booking ${existingBooking.id} payment status to ${internalStatus}`);
+                
+                return res.status(200).json({
+                  status: 'success',
+                  message: 'Existing booking payment status updated',
+                  booking_id: existingBooking.id
+                });
+              }
+              
+              // If no existing booking found, we need to get additional information from the listing
               const listingModel = require('../models/listingModel');
               const listing = await listingModel.getById(bookingMetadata.listing_id);
               
@@ -564,6 +609,7 @@ const paymentController = {
                 // Fallback to current date
                 startDate = new Date().toISOString().split('T')[0];
                 endDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                console.log('WARNING: Using fallback dates as no datetime info found in metadata');
               }
               
               // Extract booking period if available
