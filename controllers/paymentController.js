@@ -800,19 +800,25 @@ paymentController.initializeLahzaPayment = async (req, res) => {
     const reference = lahzaService.generatePaymentReference(booking_id, req.user.id);
 
     // Prepare booking metadata for Lahza
+    // Extract date and time components from datetime fields
+    const startDateTime = new Date(booking.start_datetime);
+    const endDateTime = new Date(booking.end_datetime);
+    
     const bookingMetadata = {
       booking_id: booking.id,
       user_id: booking.user_id,
       listing_id: booking.listing_id,
       host_id: booking.host_id,
-      start_date: booking.start_date,
-      end_date: booking.end_date,
-      start_time: booking.start_time,
-      end_time: booking.end_time,
+      start_date: startDateTime.toISOString().split('T')[0], // YYYY-MM-DD
+      end_date: endDateTime.toISOString().split('T')[0], // YYYY-MM-DD
+      start_time: startDateTime.toTimeString().split(' ')[0], // HH:MM:SS
+      end_time: endDateTime.toTimeString().split(' ')[0], // HH:MM:SS
+      start_datetime: booking.start_datetime,
+      end_datetime: booking.end_datetime,
       booking_type: booking.booking_type,
       booking_period: booking.booking_period,
-      total_amount: booking.total_amount,
-      guest_count: booking.guest_count,
+      total_amount: booking.total_price,
+      guest_count: booking.guests_count,
       special_requests: booking.special_requests,
       status: booking.status
     };
