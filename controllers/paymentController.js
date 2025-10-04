@@ -570,7 +570,7 @@ const paymentController = {
                 booking_period: bookingPeriod,
                 guest_count: bookingMetadata.guest_count || bookingMetadata.guests_count || 1, // Default
                 status: 'pending', // Will be updated to confirmed after payment creation
-                payment_status: 'pending',
+                payment_status: 'unpaid', // Will be updated after payment creation
                 selected_date: startDate, // This is important for determineBookingTimes
                 start_date: startDate,
                 end_date: endDate,

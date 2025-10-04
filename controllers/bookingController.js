@@ -389,13 +389,13 @@ const bookingController = {
       }
       
       // Check if booking is already paid
-      if (booking.payment_status === 'paid') {
+      if (booking.payment_status === 'fully_paid') {
         return next(badRequest('Booking is already paid'));
       }
       
       // Update payment status
       const updatedBooking = await bookingModel.update(id, {
-        payment_status: 'paid'
+        payment_status: 'fully_paid'
       });
       
       // Update payment record
