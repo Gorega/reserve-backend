@@ -628,117 +628,42 @@ const paymentController = {
               }
               
               // Extract dates from metadata if available
-              let startDate, endDate, startTime, endTime, startDatetime, endDatetime, bookingPeriod = 'full_day';
-              
-              console.log('NORMAL BOOKING STRUCTURE EXAMPLE:');
-              console.log('Expected metadata should contain:');
-              console.log({
-                start_date: '2025-01-04',
-                end_date: '2025-01-05', 
-                start_time: '14:00:00',
-                end_time: '16:00:00',
-                start_datetime: '2025-01-04 14:00:00',
-                end_datetime: '2025-01-05 16:00:00',
-                booking_type: 'daily',
-                booking_period: 'full_day',
-                listing_id: 9,
-                user_id: 2,
-                total_amount: 880
-              });
-              console.log('ACTUAL RECEIVED METADATA:', bookingMetadata);
-              
-              // Check if we have proper datetime fields in metadata
-              if (bookingMetadata.start_datetime && bookingMetadata.end_datetime) {
-                // We have full datetime information - use it directly
-                startDatetime = bookingMetadata.start_datetime;
-                endDatetime = bookingMetadata.end_datetime;
-                
-                // Extract date and time components for compatibility
-                const startDT = new Date(startDatetime);
-                const endDT = new Date(endDatetime);
-                startDate = startDT.toISOString().split('T')[0];
-                endDate = endDT.toISOString().split('T')[0];
-                startTime = startDT.toTimeString().split(' ')[0];
-                endTime = endDT.toTimeString().split(' ')[0];
-                
-                console.log('Using datetime from metadata:', { startDatetime, endDatetime });
-              } else if (bookingMetadata.start_date && bookingMetadata.start_time && bookingMetadata.end_date && bookingMetadata.end_time) {
-                // We have separate date and time components - combine them
-                startDate = bookingMetadata.start_date;
-                endDate = bookingMetadata.end_date;
-                startTime = bookingMetadata.start_time;
-                endTime = bookingMetadata.end_time;
-                startDatetime = `${startDate} ${startTime}`;
-                endDatetime = `${endDate} ${endTime}`;
-                
-                console.log('Combined datetime from separate components:', { startDatetime, endDatetime });
-              } else if (bookingMetadata.selected_date) {
-                // Legacy format with selected_date
-                startDate = bookingMetadata.selected_date;
-                endDate = bookingMetadata.end_date || startDate;
-                
-                // Use default times if not provided
-                startTime = bookingMetadata.start_time || '09:00:00';
-                endTime = bookingMetadata.end_time || '17:00:00';
-                startDatetime = `${startDate} ${startTime}`;
-                endDatetime = `${endDate} ${endTime}`;
-                
-                console.log('Using selected_date with default times:', { startDatetime, endDatetime });
-              } else if (bookingMetadata.start_date) {
-                // Basic date information
-                startDate = bookingMetadata.start_date;
-                endDate = bookingMetadata.end_date || startDate;
-                
-                // Use default times if not provided
-                startTime = bookingMetadata.start_time || '09:00:00';
-                endTime = bookingMetadata.end_time || '17:00:00';
-                startDatetime = `${startDate} ${startTime}`;
-                endDatetime = `${endDate} ${endTime}`;
-                
-                console.log('Using start_date with default times:', { startDatetime, endDatetime });
-              } else {
-                // No datetime information found - this indicates the payment was created outside of our booking flow
-                console.log('WARNING: No datetime information found in metadata. This suggests payment was created outside normal booking flow.');
-                console.log('Using fallback dates - this booking may need manual review.');
-                
-                // Fallback to current date
-                startDate = new Date().toISOString().split('T')[0];
-                endDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                startTime = '09:00:00';
-                endTime = '17:00:00';
-                startDatetime = `${startDate} ${startTime}`;
-                endDatetime = `${endDate} ${endTime}`;
-                
-                console.log('Using fallback datetime:', { startDatetime, endDatetime });
-              }
-              
-              // Extract booking period and type if available
-              if (bookingMetadata.booking_period) {
-                bookingPeriod = bookingMetadata.booking_period;
-              } else if (bookingMetadata.period) {
-                bookingPeriod = bookingMetadata.period;
-              }
+              const startDate = bookingMetadata.start_date || bookingMetadata.selected_date || new Date().toISOString().split('T')[0];
+              const endDate = bookingMetadata.end_date || startDate;
+              const startTime = bookingMetadata.start_time;
+              const endTime = bookingMetadata.end_time;
+              const bookingPeriod = bookingMetadata.booking_period || bookingMetadata.period || 'full_day';
               
               const bookingType = bookingMetadata.booking_type || 'daily';
               
-              // Create basic booking data structure with proper datetime
+              // Create basic booking data structure
               bookingData = {
-                user_id: parseInt(bookingMetadata.user_id),
-                listing_id: parseInt(bookingMetadata.listing_id),
-                host_id: listing.host_id,
-                start_datetime: startDatetime,
-                end_datetime: endDatetime,
-                total_price: bookingMetadata.total_price || bookingMetadata.confirmation_fee * 10, // Estimate total from confirmation fee
-                booking_type: bookingType,
-                booking_period: bookingPeriod,
-                guests_count: bookingMetadata.guest_count || bookingMetadata.guests_count || 1, // Default
-                status: internalStatus === 'deposit_paid' ? 'confirmed' : 'pending',
-                payment_status: internalStatus, // Use the mapped status from webhook
-                selected_date: startDate, // This is important for determineBookingTimes
+                listing_id: bookingMetadata.listing_id,
+                user_id: bookingMetadata.user_id,
+                host_id: bookingMetadata.host_id || listing.user_id,
+                selected_date: startDate,
                 start_date: startDate,
                 end_date: endDate,
+                booking_period: bookingPeriod,
+                booking_type: bookingMetadata.booking_type || 'daily',
+                guests_count: bookingMetadata.guests_count || bookingMetadata.guest_count || 1,
+                total_price: bookingMetadata.total_price || bookingMetadata.total_amount || bookingMetadata.amount,
+                payment_status: internalStatus,
+                status: internalStatus === 'deposit_paid' ? 'confirmed' : 'pending',
                 notes: `Booking created via Lahza payment webhook. Reference: ${reference}${access_code ? `, Access Code: ${access_code}` : ''}`,
-                payment_method: 'card' // This will trigger automatic payment record creation in booking model
+                is_webhook_booking: true,
+                source: 'webhook'
+              };
+              
+              // Combine date and time if available separately
+              if (bookingData.start_date && bookingData.start_time) {
+                bookingData.start_datetime = `${bookingData.start_date} ${bookingData.start_time}`;
+                console.log(`Combined start_datetime: ${bookingData.start_datetime}`);
+              }
+              
+              if (bookingData.end_date && bookingData.end_time) {
+                bookingData.end_datetime = `${bookingData.end_date} ${bookingData.end_time}`;
+                console.log(`Combined end_datetime: ${bookingData.end_datetime}`);
               }
               
               console.log('Created booking data from direct metadata:', bookingData);
