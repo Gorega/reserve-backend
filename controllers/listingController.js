@@ -851,10 +851,14 @@ const listingController = {
           // Insert new house rules
           if (listingData.house_rules.length > 0) {
             for (const rule of listingData.house_rules) {
-              await connection.query(
-                'INSERT INTO listing_house_rules (listing_id, rule_id, allowed, description) VALUES (?, ?, ?, ?)',
-                [id, rule.rule_id, rule.allowed ? 1 : 0, rule.description || null]
-              );
+              // Handle both rule_id and id fields (for backward compatibility)
+              const ruleId = rule.rule_id || rule.id;
+              if (ruleId) {
+                await connection.query(
+                  'INSERT INTO listing_house_rules (listing_id, rule_id, allowed, description) VALUES (?, ?, ?, ?)',
+                  [id, ruleId, rule.allowed ? 1 : 0, rule.description || null]
+                );
+              }
             }
           }
         }
