@@ -245,7 +245,6 @@ exports.getConversation = async (req, res, next) => {
         WHERE sender_id = ? AND receiver_id = ? AND is_read = 0
       `, [userId, req.user.id]);
     } catch (error) {
-      console.log('Warning: Could not mark messages as read. The is_read column might not exist yet.');
       // Continue execution even if this fails
     }
 
@@ -360,7 +359,6 @@ exports.getUnreadCount = async (req, res, next) => {
       });
     } catch (error) {
       // Fallback if is_read column doesn't exist
-      console.log('Warning: Could not get unread count with is_read column. Falling back to all messages.');
       const [result] = await db.query(`
         SELECT COUNT(*) as unread_count
         FROM messages
@@ -392,7 +390,6 @@ exports.markAsRead = async (req, res, next) => {
         WHERE sender_id = ? AND receiver_id = ? AND is_read = 0
       `, [userId, req.user.id]);
     } catch (error) {
-      console.log('Warning: Could not mark messages as read. The is_read column might not exist yet.');
       // Continue execution even if this fails
     }
 

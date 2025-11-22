@@ -94,13 +94,11 @@ async function ensurePricingDetailsColumn(connection) {
     
     // If column doesn't exist, create it
     if (columns.length === 0) {
-      console.log('Creating pricing_details column...');
       await connection.query(`
         ALTER TABLE listings 
         ADD COLUMN pricing_details JSON DEFAULT NULL 
         AFTER price_per_half_night
       `);
-      console.log('pricing_details column created successfully');
       return true;
     }
     

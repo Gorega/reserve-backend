@@ -60,10 +60,6 @@ const userModel = {
       // Add pagination with direct integer values in the query string instead of parameters
       query += ` LIMIT ${parseInt(limitNum, 10)} OFFSET ${parseInt(offset, 10)}`;
       
-      // Debug log to check query
-      console.log('Query:', query);
-      console.log('Parameters:', params, 'Types:', params.map(p => typeof p));
-      
       const users = await db.query(query, params);
       return users;
     } catch (error) {
@@ -207,11 +203,6 @@ const userModel = {
             userData.language || 'ar'
           );
           
-          if (emailSent) {
-            console.log(`Verification email sent successfully to ${userData.email}`);
-          } else {
-            console.warn(`Failed to send verification email to ${userData.email}`);
-          }
         } catch (emailError) {
           console.error('Error sending verification email:', emailError);
           // Don't throw error here - user creation should succeed even if email fails
@@ -494,7 +485,6 @@ const userModel = {
         throw new Error(getMessage('FAILED_TO_SEND_VERIFICATION_EMAIL', language));
       }
       
-      console.log(`Verification email resent successfully to ${user.email}`);
       return true;
     } catch (error) {
       console.error('Error resending verification email:', error);
@@ -564,7 +554,6 @@ const userModel = {
         throw new Error(getMessage('FAILED_TO_SEND_RESET_EMAIL', language));
       }
       
-      console.log(`Password reset code sent successfully to ${user.email}`);
       return true;
     } catch (error) {
       console.error('Error in generating password reset code:', error);
@@ -632,7 +621,6 @@ const userModel = {
         reset_code_expires: null
       });
       
-      console.log(`Password reset successfully for ${user.email}`);
       return true;
     } catch (error) {
       console.error('Error in resetting password:', error);

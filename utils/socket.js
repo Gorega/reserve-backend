@@ -39,7 +39,6 @@ module.exports = (io) => {
   });
 
   io.on('connection', (socket) => {
-    console.log(`User connected: ${socket.user.id}`);
     
     // Store user connection
     connectedUsers.set(socket.user.id.toString(), socket.id);
@@ -49,7 +48,6 @@ module.exports = (io) => {
     
     // Handle disconnect
     socket.on('disconnect', () => {
-      console.log(`User disconnected: ${socket.user.id}`);
       connectedUsers.delete(socket.user.id.toString());
     });
     
@@ -57,14 +55,12 @@ module.exports = (io) => {
     socket.on('join_conversation', (userId) => {
       const roomName = getConversationRoom(socket.user.id, userId);
       socket.join(roomName);
-      console.log(`User ${socket.user.id} joined conversation with ${userId}`);
     });
     
     // Handle leaving a conversation
     socket.on('leave_conversation', (userId) => {
       const roomName = getConversationRoom(socket.user.id, userId);
       socket.leave(roomName);
-      console.log(`User ${socket.user.id} left conversation with ${userId}`);
     });
   });
   

@@ -229,8 +229,6 @@ class EmailService {
       this.transporter.verify((error, success) => {
         if (error) {
           console.error('Email service configuration error:', error);
-        } else {
-          console.log('Email service is ready to send messages');
         }
       });
     } catch (error) {
@@ -437,7 +435,6 @@ class EmailService {
       };
 
       const result = await this.transporter.sendMail(mailOptions);
-      console.log('Verification email sent successfully:', result.messageId);
       return true;
     } catch (error) {
       console.error('Error sending verification email:', error);
@@ -589,7 +586,6 @@ class EmailService {
       };
 
       const result = await this.transporter.sendMail(mailOptions);
-      console.log('Welcome email sent successfully:', result.messageId);
       return true;
     } catch (error) {
       console.error('Error sending welcome email:', error);
@@ -894,7 +890,6 @@ class EmailService {
       };
 
       const result = await this.transporter.sendMail(mailOptions);
-      console.log('Password reset code email sent successfully:', result.messageId);
       return true;
     } catch (error) {
       console.error('Error sending password reset code email:', error);
@@ -933,7 +928,6 @@ class EmailService {
       };
 
       const result = await this.transporter.sendMail(mailOptions);
-      console.log('Password reset email sent successfully:', result.messageId);
       return true;
     } catch (error) {
       console.error('Error sending password reset email:', error);

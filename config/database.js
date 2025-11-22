@@ -32,7 +32,6 @@ function getPool() {
     // Global error handler for pool
     pool.on('error', err => console.error('MySQL_POOL_ERROR', err));
     
-    console.log('MySQL connection pool created');
   }
   return pool;
 }
@@ -46,10 +45,6 @@ function getPool() {
 async function query(sql, params) {
   try {
     const pool = getPool();
-    
-    // Log the query and parameters for debugging
-    console.log('SQL Query:', sql);
-    console.log('Parameters:', JSON.stringify(params));
     
     // Make sure params is always an array
     const safeParams = Array.isArray(params) ? params : [];
