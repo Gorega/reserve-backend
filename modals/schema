@@ -541,9 +541,7 @@ CREATE TABLE appointment_queue (
 
 -- Insert main categories first
 INSERT INTO categories (name, translated_name) VALUES 
-('Property', '{"ar": "أماكن", "he": "מקומות"}'),
-('Vehicle', '{"ar": "سيارات", "he": "רכבים להשכרה"}'),
-('Service', '{"ar": "خدمات", "he": "שירותים"}');
+('Property', '{"ar": "أماكن", "he": "מקומות"}');
 -- ('Subscription', '{"ar": "اشتراكات", "he": "מנויים"}');
 
 -- Property subcategories (parent_id = 1)
@@ -553,12 +551,7 @@ INSERT INTO categories (name, translated_name, parent_id) VALUES
 ('Apartment', '{"ar": "شقة", "he": "דירה"}', 1),
 ('Room', '{"ar": "غرفة", "he": "חדר"}', 1),
 ('House', '{"ar": "منزل", "he": "בית"}', 1),
-('Container', '{"ar": "كونتينر", "he": "קונטיינר"}', 1),
-('Hotel', '{"ar": "فندق", "he": "מלון"}', 1),
-('Pool', '{"ar": "مسبح", "he": "בריכה"}', 1),
-('Wedding Hall', '{"ar": "قاعة أفراح", "he": "אולם חתונות"}', 1),
-('Conference Room', '{"ar": "قاعة مؤتمرات", "he": "חדר כנסים"}', 1),
-('Event Space', '{"ar": "مساحة فعاليات", "he": "מרחב לאירועים"}', 1);
+('Pool', '{"ar": "مسبح", "he": "בריכה"}', 1);
 
 -- Vehicle subcategories (parent_id = 2)
 INSERT INTO categories (name, translated_name, parent_id) VALUES
