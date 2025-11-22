@@ -88,6 +88,43 @@ const listingController = {
             
       // Get listings
       const listings = await listingModel.getAll(filters, page, limit);
+
+      // Enrich with photos and amenities if not already present
+      if (Array.isArray(listings) && listings.length > 0) {
+        const listingIds = listings.map(l => l.id);
+        const placeholders = listingIds.map(() => '?').join(',');
+        let photosMap = {};
+        let amenitiesMap = {};
+        try {
+          const photosRows = await require('../config/database').query(
+            `SELECT listing_id, id, image_url, is_cover
+             FROM listing_photos
+             WHERE listing_id IN (${placeholders})
+             ORDER BY is_cover DESC, id ASC`,
+            listingIds
+          );
+          for (const row of photosRows) {
+            if (!photosMap[row.listing_id]) photosMap[row.listing_id] = [];
+            photosMap[row.listing_id].push({ id: row.id, image_url: row.image_url, is_cover: row.is_cover });
+          }
+          const amenitiesRows = await require('../config/database').query(
+            `SELECT la.listing_id, a.*
+             FROM listing_amenities la
+             JOIN amenities a ON la.amenity_id = a.id
+             WHERE la.listing_id IN (${placeholders})`,
+            listingIds
+          );
+          for (const row of amenitiesRows) {
+            if (!amenitiesMap[row.listing_id]) amenitiesMap[row.listing_id] = [];
+            amenitiesMap[row.listing_id].push(row);
+          }
+        } catch (e) {
+        }
+        for (const l of listings) {
+          if (l.photos === undefined) l.photos = photosMap[l.id] || [];
+          if (l.amenities === undefined) l.amenities = amenitiesMap[l.id] || [];
+        }
+      }
       
       // Count total listings for pagination
       const countQuery = await listingModel.getAll(filters, 1, Number.MAX_SAFE_INTEGER);
