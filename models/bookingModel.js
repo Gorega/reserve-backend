@@ -346,6 +346,37 @@ const bookingModel = {
       // Format dates for MySQL - preserve the exact times provided
       const formattedStartDatetime = this.formatDateForMySQL(finalStartDatetime);
       const formattedEndDatetime = this.formatDateForMySQL(finalEndDatetime);
+      
+      // Idempotency: prevent duplicate bookings for same user/listing/slot
+      try {
+        // Check by transaction reference embedded in notes
+        if (bookingData && bookingData.notes) {
+          const refMatch = bookingData.notes.match(/Transaction:\s*([\w-]+)/i);
+          if (refMatch && refMatch[1]) {
+            const existingByRef = await db.query(
+              'SELECT id FROM bookings WHERE notes LIKE ? AND user_id = ? AND listing_id = ? ORDER BY id DESC LIMIT 1',
+              [`%${refMatch[1]}%`, user_id, listing_id]
+            );
+            if (Array.isArray(existingByRef) && existingByRef.length > 0) {
+              return this.getById(existingByRef[0].id);
+            }
+          }
+        }
+        
+        // Check exact same time slot for same user and listing
+        const duplicate = await db.query(
+          `SELECT id FROM bookings 
+           WHERE listing_id = ? AND user_id = ? 
+             AND start_datetime = ? AND end_datetime = ? 
+             AND status IN ('pending','confirmed')
+           ORDER BY id DESC LIMIT 1`,
+          [listing_id, user_id, formattedStartDatetime, formattedEndDatetime]
+        );
+        if (Array.isArray(duplicate) && duplicate.length > 0) {
+          return this.getById(duplicate[0].id);
+        }
+      } catch (dupErr) {
+      }
             
       // For appointment bookings, atomically assign a ticket number within the transaction
       let ticketNumber = null;
@@ -638,9 +669,16 @@ const bookingModel = {
       // Create payment record if payment_method is provided
       if (bookingData.payment_method) {
         try {
-          // Calculate confirmation fee (10% of total price)
-          const confirmationFeePercent = 10;
-          const confirmationFee = (totalPrice * confirmationFeePercent) / 100;
+          // Use provided confirmation_fee if available; otherwise default to 10%
+          let confirmationFee = null;
+          if (bookingData.confirmation_fee != null) {
+            const cf = typeof bookingData.confirmation_fee === 'string' ? parseFloat(bookingData.confirmation_fee) : bookingData.confirmation_fee;
+            confirmationFee = !isNaN(cf) ? cf : null;
+          }
+          if (confirmationFee == null) {
+            const confirmationFeePercent = 10;
+            confirmationFee = (totalPrice * confirmationFeePercent) / 100;
+          }
           
           // Set payment deadline for cash deposits (12 hours from now)
           let payment_deadline = null;

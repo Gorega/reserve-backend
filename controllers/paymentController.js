@@ -306,6 +306,12 @@ const paymentController = {
    */
   async processPayment(req, res, next) {
     try {
+      const normalizeAmount = (val) => {
+        if (val == null) return null;
+        const n = typeof val === 'string' ? parseFloat(val) : val;
+        if (isNaN(n)) return null;
+        return n >= 1000 ? Math.round(n) / 100 : n;
+      };
 
       // Handle both GET and POST requests
       // For GET requests, data comes in query parameters
@@ -439,211 +445,35 @@ const paymentController = {
         }
       }
 
-      // If still not found, check if we have booking metadata to create the booking
+      // If still not found, avoid creating a new booking here to prevent duplicates.
+      // Try to update an existing booking by reference in notes, otherwise acknowledge.
       if (!payment) {
-        
-        // Try to parse metadata for booking information
-        let bookingMetadata = null;
-        
         try {
-          if (metadata && typeof metadata === 'string') {
-            bookingMetadata = JSON.parse(metadata);
-          } else if (metadata && typeof metadata === 'object') {
-            bookingMetadata = metadata;
-          } else if (parsedMetadata && Object.keys(parsedMetadata).length > 0) {
-            bookingMetadata = parsedMetadata;
-          }
-          
-        } catch (error) {
-        }
-        
-        // Check if we have booking metadata in the expected format or direct metadata
-        const hasValidBookingData = (bookingMetadata && bookingMetadata.booking_data) || 
-                                   (bookingMetadata && bookingMetadata.listing_id && bookingMetadata.user_id);
-        
-        if (bookingMetadata && hasValidBookingData && (internalStatus === 'deposit_paid' || internalStatus === 'fully_paid')) {
-          
-          try {
-            // Prepare booking data from metadata
-            let bookingData;
-            
-            if (bookingMetadata.booking_data) {
-              // Use structured booking data
-              bookingData = bookingMetadata.booking_data;
-              
-              // Ensure datetime fields are properly combined if they're separate
-              if (!bookingData.start_datetime && bookingData.start_date && bookingData.start_time) {
-                bookingData.start_datetime = `${bookingData.start_date} ${bookingData.start_time}`;
-              }
-              
-              if (!bookingData.end_datetime && bookingData.end_date && bookingData.end_time) {
-                bookingData.end_datetime = `${bookingData.end_date} ${bookingData.end_time}`;
-              }
-            } else {
-              // Create booking data from direct metadata
-              // First, check if there's an existing booking for this payment reference
-              let existingBooking = null;
-              
-              
-              try {
-                // Try to find existing booking by reference or user/listing combination
-                const bookingModel = require('../models/bookingModel');
-                
-                // Look for existing bookings with this reference in notes
-                const pool = await db.getPool();
-                const searchPattern = `%${reference}%`;
-                
-                const [existingBookings] = await pool.execute(
-                  'SELECT * FROM bookings WHERE notes LIKE ? AND user_id = ? AND listing_id = ? ORDER BY created_at DESC LIMIT 1',
-                  [searchPattern, bookingMetadata.user_id, bookingMetadata.listing_id]
-                );
-                
-                
-                if (existingBookings.length > 0) {
-                  existingBooking = existingBookings[0];
-                  
-                } else {
-                  
-                  // Also try to find any booking for this user/listing combination
-                  const [anyBookings] = await pool.execute(
-                    'SELECT id, notes, created_at FROM bookings WHERE user_id = ? AND listing_id = ? ORDER BY created_at DESC LIMIT 3',
-                    [bookingMetadata.user_id, bookingMetadata.listing_id]
-                  );
-                
-                }
-              } catch (error) {
-              }
-              
-              // If we found an existing booking, use its datetime information
-              if (existingBooking) {
-                
-                // Update the existing booking's payment status instead of creating a new one
-                const bookingModel = require('../models/bookingModel');
-                await bookingModel.update(existingBooking.id, {
-                  payment_status: internalStatus,
-                  status: internalStatus === 'deposit_paid' ? 'confirmed' : existingBooking.status
-                });
-                                
-                return res.status(200).json({
-                  status: 'success',
-                  message: 'Existing booking payment status updated',
-                  booking_id: existingBooking.id
-                });
-              }
-              
-              // If no existing booking found, we need to get additional information from the listing
-              const listingModel = require('../models/listingModel');
-              const listing = await listingModel.getById(bookingMetadata.listing_id);
-              
-              if (!listing) {
-                throw new Error(`Listing not found: ${bookingMetadata.listing_id}`);
-              }
-              
-              // Extract dates from metadata if available
-              const startDate = bookingMetadata.start_date || bookingMetadata.selected_date || new Date().toISOString().split('T')[0];
-              const endDate = bookingMetadata.end_date || startDate;
-              const startTime = bookingMetadata.start_time;
-              const endTime = bookingMetadata.end_time;
-              const bookingPeriod = bookingMetadata.booking_period || bookingMetadata.period || 'full_day';
-              
-              const bookingType = bookingMetadata.booking_type || 'daily';
-              
-              // Create basic booking data structure
-              bookingData = {
-                listing_id: bookingMetadata.listing_id,
-                user_id: bookingMetadata.user_id,
-                host_id: bookingMetadata.host_id || listing.user_id,
-                selected_date: startDate,
-                start_date: startDate,
-                end_date: endDate,
-                booking_period: bookingPeriod,
-                booking_type: bookingMetadata.booking_type || 'daily',
-                guests_count: bookingMetadata.guests_count || bookingMetadata.guest_count || 1,
-                total_price: bookingMetadata.total_price || bookingMetadata.total_amount || bookingMetadata.amount,
-                payment_status: internalStatus,
-                status: internalStatus === 'deposit_paid' ? 'confirmed' : 'pending',
-                notes: `Booking created via Lahza payment webhook. Reference: ${reference}${access_code ? `, Access Code: ${access_code}` : ''}`,
-                is_webhook_booking: true,
-                source: 'webhook'
-              };
-              
-              // Combine date and time if available separately
-              if (bookingData.start_date && bookingData.start_time) {
-                bookingData.start_datetime = `${bookingData.start_date} ${bookingData.start_time}`;
-              }
-              
-              if (bookingData.end_date && bookingData.end_time) {
-                bookingData.end_datetime = `${bookingData.end_date} ${bookingData.end_time}`;
-              }
-              
-            }
-            
-            // Add webhook flag to indicate this is a webhook-created booking
-            bookingData.is_webhook_booking = true;
-            bookingData.source = 'webhook';
-            
-            // Create the booking using the prepared data
-            const booking = await bookingModel.create(bookingData);
-            
-            // The booking model automatically created a payment record
-            // Now update it with Lahza-specific fields
-            const [payments] = await db.query(
-              'SELECT id FROM payments WHERE booking_id = ? ORDER BY id DESC LIMIT 1',
-              [booking.id]
-            );
-            
-            if (payments.length > 0) {
-              const paymentId = payments[0].id;
-              
-              // Update the payment record with Lahza-specific fields
-              await db.query(
-                'UPDATE payments SET transaction_id = ?, lahza_reference = ?, lahza_access_code = ?, currency = ?, paid_at = ? WHERE id = ?',
-                [
-                  transaction_id || reference,
-                  reference,
-                  access_code,
-                  currency || 'SAR',
-                  paid_at ? new Date(paid_at) : new Date(),
-                  paymentId
-                ]
-              );
-              
-            }
-            
-            // Update booking status to confirmed
-            await bookingModel.update(booking.id, {
+          const pool = await db.getPool();
+          const [existingBookings] = await pool.execute(
+            'SELECT id, status FROM bookings WHERE notes LIKE ? ORDER BY created_at DESC LIMIT 1',
+            [`%${reference}%`]
+          );
+          if (existingBookings && existingBookings.length > 0) {
+            const existing = existingBookings[0];
+            await bookingModel.update(existing.id, {
               payment_status: internalStatus,
-              status: 'confirmed',
+              status: internalStatus === 'deposit_paid' ? 'confirmed' : existing.status,
               auto_cancel_at: null
             });
-            
             return res.status(200).json({
               status: 'success',
-              message: 'Booking created from webhook metadata',
-              data: {
-                booking_id: booking.id,
-                payment_id: payments.length > 0 ? payments[0].id : null,
-                status: internalStatus,
-                reference: reference
-              }
-            });
-            
-          } catch (bookingError) {
-            console.error('Error creating booking from webhook metadata:', bookingError);
-            
-            // Still acknowledge the webhook to prevent retries
-            return res.status(200).json({
-              status: 'error',
-              message: 'Failed to create booking from webhook metadata',
-              error: bookingError.message
+              message: 'Existing booking updated by reference',
+              booking_id: existing.id,
+              reference
             });
           }
+        } catch (lookupErr) {
         }
-        
-        // If no metadata or payment failed, just acknowledge the webhook
         return res.status(200).json({
           status: 'success',
-          message: 'Webhook received but no matching payment record or booking metadata found'
+          message: 'Webhook received; no matching payment record found. Skipped booking creation to prevent duplicates',
+          reference
         });
       }
 
@@ -653,8 +483,8 @@ const paymentController = {
         transaction_id: transaction_id || reference,
         lahza_reference: reference,
         lahza_access_code: access_code,
-        amount: amount || payment.amount,
-        currency: currency || 'SAR',
+        amount: normalizeAmount(amount != null ? amount : payment.amount),
+        currency: currency || 'ILS',
         payment_method: payment_method || 'card'
       };
 
