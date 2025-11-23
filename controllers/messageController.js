@@ -95,29 +95,60 @@ exports.getUserConversations = async (req, res, next) => {
   try {
     // In MySQL, we need to get unique conversation partners
     // Fixed query to comply with ONLY_FULL_GROUP_BY mode
-    const conversations = await db.query(`
+  const conversations = await db.query(`
       SELECT 
         u.id as user_id,
         u.name,
         u.profile_image,
-        MAX(l.id) as listing_id,
-        MAX(l.title) as listing_title,
+        (
+          SELECT l2.id
+          FROM messages m2
+          LEFT JOIN listings l2 ON m2.listing_id = l2.id
+          WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
+            AND m2.listing_id IS NOT NULL
+          ORDER BY COALESCE(m2.sent_at, m2.created_at) DESC
+          LIMIT 1
+        ) as listing_id,
+        (
+          SELECT l2.title
+          FROM messages m2
+          LEFT JOIN listings l2 ON m2.listing_id = l2.id
+          WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
+            AND m2.listing_id IS NOT NULL
+          ORDER BY COALESCE(m2.sent_at, m2.created_at) DESC
+          LIMIT 1
+        ) as listing_title,
+        (
+          SELECT image_url 
+          FROM listing_photos lp
+          WHERE lp.listing_id = (
+            SELECT l3.id
+            FROM messages m3
+            LEFT JOIN listings l3 ON m3.listing_id = l3.id
+            WHERE (m3.sender_id = ? AND m3.receiver_id = u.id) OR (m3.sender_id = u.id AND m3.receiver_id = ?)
+              AND m3.listing_id IS NOT NULL
+            ORDER BY COALESCE(m3.sent_at, m3.created_at) DESC
+            LIMIT 1
+          )
+          AND lp.is_cover = 1
+          LIMIT 1
+        ) as listing_image,
         (
           SELECT m.message 
           FROM messages m 
           WHERE 
             (m.sender_id = ? AND m.receiver_id = u.id) OR 
             (m.sender_id = u.id AND m.receiver_id = ?) 
-          ORDER BY m.sent_at DESC 
+          ORDER BY COALESCE(m.sent_at, m.created_at) DESC 
           LIMIT 1
         ) as last_message,
         (
-          SELECT m.sent_at 
+          SELECT COALESCE(m.sent_at, m.created_at) 
           FROM messages m 
           WHERE 
             (m.sender_id = ? AND m.receiver_id = u.id) OR 
             (m.sender_id = u.id AND m.receiver_id = ?) 
-          ORDER BY m.sent_at DESC 
+          ORDER BY COALESCE(m.sent_at, m.created_at) DESC 
           LIMIT 1
         ) as last_message_time,
         (
@@ -126,17 +157,19 @@ exports.getUserConversations = async (req, res, next) => {
           WHERE 
             m.sender_id = u.id AND 
             m.receiver_id = ? AND
-            m.is_read = 0
+            (m.is_read = 0 OR m.is_read IS NULL)
         ) as unread_count
       FROM users u
       JOIN messages m ON (m.sender_id = u.id AND m.receiver_id = ?) OR (m.receiver_id = u.id AND m.sender_id = ?)
-      LEFT JOIN listings l ON m.listing_id = l.id
       GROUP BY u.id, u.name, u.profile_image
       ORDER BY last_message_time DESC
     `, [
-      req.user.id, req.user.id, 
-      req.user.id, req.user.id, 
-      req.user.id, 
+      req.user.id, req.user.id,
+      req.user.id, req.user.id,
+      req.user.id, req.user.id,
+      req.user.id, req.user.id,
+      req.user.id, req.user.id,
+      req.user.id,
       req.user.id, req.user.id
     ]).catch(error => {
       // If error is about is_read column, try without it
@@ -146,24 +179,55 @@ exports.getUserConversations = async (req, res, next) => {
             u.id as user_id,
             u.name,
             u.profile_image,
-            MAX(l.id) as listing_id,
-            MAX(l.title) as listing_title,
+            (
+              SELECT l2.id
+              FROM messages m2
+              LEFT JOIN listings l2 ON m2.listing_id = l2.id
+              WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
+                AND m2.listing_id IS NOT NULL
+              ORDER BY COALESCE(m2.sent_at, m2.created_at) DESC
+              LIMIT 1
+            ) as listing_id,
+            (
+              SELECT l2.title
+              FROM messages m2
+              LEFT JOIN listings l2 ON m2.listing_id = l2.id
+              WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
+                AND m2.listing_id IS NOT NULL
+              ORDER BY COALESCE(m2.sent_at, m2.created_at) DESC
+              LIMIT 1
+            ) as listing_title,
+            (
+              SELECT image_url 
+              FROM listing_photos lp
+              WHERE lp.listing_id = (
+                SELECT l3.id
+                FROM messages m3
+                LEFT JOIN listings l3 ON m3.listing_id = l3.id
+                WHERE (m3.sender_id = ? AND m3.receiver_id = u.id) OR (m3.sender_id = u.id AND m3.receiver_id = ?)
+                  AND m3.listing_id IS NOT NULL
+                ORDER BY COALESCE(m3.sent_at, m3.created_at) DESC
+                LIMIT 1
+              )
+              AND lp.is_cover = 1
+              LIMIT 1
+            ) as listing_image,
             (
               SELECT m.message 
               FROM messages m 
               WHERE 
                 (m.sender_id = ? AND m.receiver_id = u.id) OR 
                 (m.sender_id = u.id AND m.receiver_id = ?) 
-              ORDER BY m.sent_at DESC 
+              ORDER BY COALESCE(m.sent_at, m.created_at) DESC 
               LIMIT 1
             ) as last_message,
             (
-              SELECT m.sent_at 
+              SELECT COALESCE(m.sent_at, m.created_at) 
               FROM messages m 
               WHERE 
                 (m.sender_id = ? AND m.receiver_id = u.id) OR 
                 (m.sender_id = u.id AND m.receiver_id = ?) 
-              ORDER BY m.sent_at DESC 
+              ORDER BY COALESCE(m.sent_at, m.created_at) DESC 
               LIMIT 1
             ) as last_message_time,
             (
@@ -175,13 +239,15 @@ exports.getUserConversations = async (req, res, next) => {
             ) as unread_count
           FROM users u
           JOIN messages m ON (m.sender_id = u.id AND m.receiver_id = ?) OR (m.receiver_id = u.id AND m.sender_id = ?)
-          LEFT JOIN listings l ON m.listing_id = l.id
           GROUP BY u.id, u.name, u.profile_image
           ORDER BY last_message_time DESC
         `, [
-          req.user.id, req.user.id, 
-          req.user.id, req.user.id, 
-          req.user.id, 
+          req.user.id, req.user.id,
+          req.user.id, req.user.id,
+          req.user.id, req.user.id,
+          req.user.id, req.user.id,
+          req.user.id, req.user.id,
+          req.user.id,
           req.user.id, req.user.id
         ]);
       }
