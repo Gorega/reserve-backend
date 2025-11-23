@@ -35,11 +35,27 @@ exports.createConversation = async (req, res, next) => {
       });
     }
 
-    // Create message
+    let effectiveListingId = listingId || null;
+    if (!effectiveListingId) {
+      try {
+        const rows = await db.query(`
+          SELECT b.listing_id
+          FROM bookings b
+          JOIN listings l ON l.id = b.listing_id
+          WHERE (b.user_id = ? AND l.user_id = ?) OR (b.user_id = ? AND l.user_id = ?)
+          ORDER BY b.created_at DESC
+          LIMIT 1
+        `, [req.user.id, recipientId, recipientId, req.user.id]);
+        if (Array.isArray(rows) && rows.length > 0) {
+          effectiveListingId = rows[0].listing_id;
+        }
+      } catch (e) {}
+    }
+
     const messageData = {
       sender_id: req.user.id,
       receiver_id: recipientId,
-      listing_id: listingId || null,
+      listing_id: effectiveListingId,
       message: initialMessage,
       is_read: false
     };
@@ -143,7 +159,7 @@ exports.getUserConversations = async (req, res, next) => {
           )
         ) as listing_title,
         (
-          SELECT image_url 
+          SELECT TRIM(REPLACE(image_url, CHAR(96), '')) 
           FROM listing_photos lp
           WHERE lp.listing_id = (
             SELECT COALESCE(
@@ -271,8 +287,8 @@ exports.getUserConversations = async (req, res, next) => {
               )
             ) as listing_title,
             (
-              SELECT image_url 
-              FROM listing_photos lp
+          SELECT TRIM(REPLACE(image_url, CHAR(96), '')) 
+          FROM listing_photos lp
               WHERE lp.listing_id = (
                 SELECT COALESCE(
                   (
@@ -458,11 +474,27 @@ exports.sendMessage = async (req, res, next) => {
       }
     }
 
-    // Create message
+    let effectiveListingId = listingId || null;
+    if (!effectiveListingId) {
+      try {
+        const rows = await db.query(`
+          SELECT b.listing_id
+          FROM bookings b
+          JOIN listings l ON l.id = b.listing_id
+          WHERE (b.user_id = ? AND l.user_id = ?) OR (b.user_id = ? AND l.user_id = ?)
+          ORDER BY b.created_at DESC
+          LIMIT 1
+        `, [req.user.id, userId, userId, req.user.id]);
+        if (Array.isArray(rows) && rows.length > 0) {
+          effectiveListingId = rows[0].listing_id;
+        }
+      } catch (e) {}
+    }
+
     const messageData = {
       sender_id: req.user.id,
       receiver_id: userId,
-      listing_id: listingId || null,
+      listing_id: effectiveListingId,
       message,
       is_read: false
     };
