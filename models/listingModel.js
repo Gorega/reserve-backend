@@ -304,6 +304,34 @@ const listingModel = {
       
       // Add pricing options with unified duration pricing for each listing
       if (listings.length > 0) {
+        const listingIds = listings.map(l => l.id);
+        let photosMap = {};
+        let amenitiesMap = {};
+        if (listingIds.length > 0 && limit <= 5000) {
+          const placeholders = listingIds.map(() => '?').join(',');
+          const photosRows = await db.query(
+            `SELECT listing_id, id, image_url, is_cover
+             FROM listing_photos
+             WHERE listing_id IN (${placeholders})
+             ORDER BY is_cover DESC, id ASC`,
+            listingIds
+          );
+          for (const row of photosRows) {
+            if (!photosMap[row.listing_id]) photosMap[row.listing_id] = [];
+            photosMap[row.listing_id].push({ id: row.id, image_url: row.image_url, is_cover: row.is_cover });
+          }
+          const amenitiesRows = await db.query(
+            `SELECT la.listing_id, a.*
+             FROM listing_amenities la
+             JOIN amenities a ON la.amenity_id = a.id
+             WHERE la.listing_id IN (${placeholders})`,
+            listingIds
+          );
+          for (const row of amenitiesRows) {
+            if (!amenitiesMap[row.listing_id]) amenitiesMap[row.listing_id] = [];
+            amenitiesMap[row.listing_id].push(row);
+          }
+        }
         for (const listing of listings) {
           // Get pricing options for this listing
           listing.pricing_options = await pricingOptionModel.getByListingId(listing.id);
@@ -319,6 +347,8 @@ const listingModel = {
             listing.unified_duration = defaultOption.duration || 1;
             listing.price_per_unit = listing.unified_price / listing.unified_duration;
           }
+          listing.photos = photosMap[listing.id] || [];
+          listing.amenities = amenitiesMap[listing.id] || [];
         }
       }
       

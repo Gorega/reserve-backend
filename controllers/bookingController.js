@@ -181,7 +181,6 @@ const bookingController = {
         if (!bookingData.host_id) {
           // Use the listing's user_id as the host_id
           bookingData.host_id = listing.user_id;
-          console.log(`Auto-setting host_id to ${listing.user_id} for appointment booking`);
         }
       }
       
