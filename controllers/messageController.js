@@ -106,7 +106,7 @@ exports.getUserConversations = async (req, res, next) => {
           LEFT JOIN listings l2 ON m2.listing_id = l2.id
           WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
             AND m2.listing_id IS NOT NULL
-          ORDER BY COALESCE(m2.sent_at, m2.created_at) DESC
+          ORDER BY m2.sent_at DESC
           LIMIT 1
         ) as listing_id,
         (
@@ -115,7 +115,7 @@ exports.getUserConversations = async (req, res, next) => {
           LEFT JOIN listings l2 ON m2.listing_id = l2.id
           WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
             AND m2.listing_id IS NOT NULL
-          ORDER BY COALESCE(m2.sent_at, m2.created_at) DESC
+          ORDER BY m2.sent_at DESC
           LIMIT 1
         ) as listing_title,
         (
@@ -127,7 +127,7 @@ exports.getUserConversations = async (req, res, next) => {
             LEFT JOIN listings l3 ON m3.listing_id = l3.id
             WHERE (m3.sender_id = ? AND m3.receiver_id = u.id) OR (m3.sender_id = u.id AND m3.receiver_id = ?)
               AND m3.listing_id IS NOT NULL
-            ORDER BY COALESCE(m3.sent_at, m3.created_at) DESC
+            ORDER BY m3.sent_at DESC
             LIMIT 1
           )
           AND lp.is_cover = 1
@@ -139,16 +139,16 @@ exports.getUserConversations = async (req, res, next) => {
           WHERE 
             (m.sender_id = ? AND m.receiver_id = u.id) OR 
             (m.sender_id = u.id AND m.receiver_id = ?) 
-          ORDER BY COALESCE(m.sent_at, m.created_at) DESC 
+          ORDER BY m.sent_at DESC 
           LIMIT 1
         ) as last_message,
         (
-          SELECT COALESCE(m.sent_at, m.created_at) 
+          SELECT m.sent_at 
           FROM messages m 
           WHERE 
             (m.sender_id = ? AND m.receiver_id = u.id) OR 
             (m.sender_id = u.id AND m.receiver_id = ?) 
-          ORDER BY COALESCE(m.sent_at, m.created_at) DESC 
+          ORDER BY m.sent_at DESC 
           LIMIT 1
         ) as last_message_time,
         (
@@ -185,7 +185,7 @@ exports.getUserConversations = async (req, res, next) => {
               LEFT JOIN listings l2 ON m2.listing_id = l2.id
               WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
                 AND m2.listing_id IS NOT NULL
-              ORDER BY COALESCE(m2.sent_at, m2.created_at) DESC
+              ORDER BY m2.sent_at DESC
               LIMIT 1
             ) as listing_id,
             (
@@ -194,7 +194,7 @@ exports.getUserConversations = async (req, res, next) => {
               LEFT JOIN listings l2 ON m2.listing_id = l2.id
               WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
                 AND m2.listing_id IS NOT NULL
-              ORDER BY COALESCE(m2.sent_at, m2.created_at) DESC
+              ORDER BY m2.sent_at DESC
               LIMIT 1
             ) as listing_title,
             (
@@ -206,7 +206,7 @@ exports.getUserConversations = async (req, res, next) => {
                 LEFT JOIN listings l3 ON m3.listing_id = l3.id
                 WHERE (m3.sender_id = ? AND m3.receiver_id = u.id) OR (m3.sender_id = u.id AND m3.receiver_id = ?)
                   AND m3.listing_id IS NOT NULL
-                ORDER BY COALESCE(m3.sent_at, m3.created_at) DESC
+                ORDER BY m3.sent_at DESC
                 LIMIT 1
               )
               AND lp.is_cover = 1
@@ -218,16 +218,16 @@ exports.getUserConversations = async (req, res, next) => {
               WHERE 
                 (m.sender_id = ? AND m.receiver_id = u.id) OR 
                 (m.sender_id = u.id AND m.receiver_id = ?) 
-              ORDER BY COALESCE(m.sent_at, m.created_at) DESC 
+              ORDER BY m.sent_at DESC 
               LIMIT 1
             ) as last_message,
             (
-              SELECT COALESCE(m.sent_at, m.created_at) 
+              SELECT m.sent_at 
               FROM messages m 
               WHERE 
                 (m.sender_id = ? AND m.receiver_id = u.id) OR 
                 (m.sender_id = u.id AND m.receiver_id = ?) 
-              ORDER BY COALESCE(m.sent_at, m.created_at) DESC 
+              ORDER BY m.sent_at DESC 
               LIMIT 1
             ) as last_message_time,
             (
