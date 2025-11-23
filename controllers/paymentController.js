@@ -306,6 +306,12 @@ const paymentController = {
    */
   async processPayment(req, res, next) {
     try {
+      console.log('Lahza Webhook received:', {
+        method: req.method,
+        headers: req.headers,
+        body: req.body,
+        query: req.query
+      });
 
       // Handle both GET and POST requests
       // For GET requests, data comes in query parameters
@@ -313,6 +319,7 @@ const paymentController = {
       let webhookData;
       if (req.method === 'GET') {
         webhookData = req.query;
+        console.log('Processing GET webhook with query parameters');
         
         // If it's a simple GET request without parameters, return a test response
         if (Object.keys(webhookData).length === 0) {
@@ -324,6 +331,7 @@ const paymentController = {
         }
       } else {
         webhookData = req.body;
+        console.log('Processing POST webhook with body data');
       }
 
       // Verify webhook signature if secret is configured (only for POST requests)
@@ -333,6 +341,7 @@ const paymentController = {
         const rawBody = req.rawBody || JSON.stringify(req.body);
         
         if (!signature) {
+          console.log('Missing webhook signature');
           return res.status(401).json({
             status: 'error',
             message: 'Missing webhook signature'
@@ -340,19 +349,28 @@ const paymentController = {
         }
 
         if (!this.verifyWebhookSignature(rawBody, signature, webhookSecret)) {
+          console.log('Invalid webhook signature');
           return res.status(401).json({
             status: 'error',
             message: 'Invalid webhook signature'
           });
         }
 
+        console.log('Webhook signature verified successfully');
+      } else if (req.method === 'GET') {
+        console.log('GET request - skipping signature verification');
+      } else {
+        console.log('Warning: LAHZA_WEBHOOK_SECRET not configured, skipping signature verification');
       }
       
       // Extract relevant data from Lahza webhook
       // Lahza sends data in a nested structure: { data: { ... }, event: '...' }
       const paymentData = webhookData.data || webhookData;
       const event = webhookData.event;
-            
+      
+      console.log('Payment data extracted:', paymentData);
+      console.log('Event type:', event);
+      
       const {
         reference,
         status,
@@ -376,6 +394,7 @@ const paymentController = {
 
       // Parse metadata if available
       let parsedMetadata = {};
+      console.log('Raw metadata received:', metadata, 'Type:', typeof metadata);
       if (metadata) {
         try {
           if (typeof metadata === 'string') {
@@ -383,13 +402,31 @@ const paymentController = {
           } else if (typeof metadata === 'object') {
             parsedMetadata = metadata;
           }
+          console.log('Parsed metadata:', parsedMetadata);
         } catch (error) {
+          console.log('Error parsing metadata:', error);
         }
+      } else {
+        console.log('No metadata found in webhook payload');
       }
 
+      console.log('Extracted webhook data:', {
+        reference,
+        status,
+        amount,
+        transaction_id,
+        gateway_response,
+        customer_email,
+        customer_phone,
+        payment_method,
+        currency,
+        event,
+        metadata: parsedMetadata
+      });
 
       // Validate required fields
       if (!reference) {
+        console.log('Missing reference in webhook payload');
         return res.status(400).json({
           status: 'error',
           message: 'Missing reference in webhook payload'
@@ -419,6 +456,8 @@ const paymentController = {
           internalStatus = 'pending';
       }
 
+      console.log('Mapped status:', { original: status, internal: internalStatus });
+
       // Try to find payment by Lahza reference/transaction ID
       // We'll need to search by the reference we stored when creating the payment
       let payment = null;
@@ -429,6 +468,7 @@ const paymentController = {
         // We might need to add this to the payment model
         payment = await paymentModel.getByReference(reference);
       } catch (error) {
+        console.log('Could not find payment by reference, trying transaction_id');
       }
 
       // If not found by reference, try by transaction_id
@@ -436,14 +476,22 @@ const paymentController = {
         try {
           payment = await paymentModel.getByTransactionId(transaction_id);
         } catch (error) {
+          console.log('Could not find payment by transaction_id');
         }
       }
 
       // If still not found, check if we have booking metadata to create the booking
       if (!payment) {
+        console.log('Payment record not found, checking for booking metadata');
         
         // Try to parse metadata for booking information
         let bookingMetadata = null;
+        console.log('Attempting to extract booking metadata from:', {
+          metadata: metadata,
+          parsedMetadata: parsedMetadata,
+          metadataType: typeof metadata,
+          parsedMetadataType: typeof parsedMetadata
+        });
         
         try {
           if (metadata && typeof metadata === 'string') {
@@ -454,14 +502,26 @@ const paymentController = {
             bookingMetadata = parsedMetadata;
           }
           
+          console.log('Extracted booking metadata:', bookingMetadata);
         } catch (error) {
+          console.log('Could not parse metadata:', error);
         }
+        
+        // If we have booking metadata and payment is successful, create the booking
+        console.log('Checking booking metadata conditions:', {
+          hasBookingMetadata: !!bookingMetadata,
+          hasBookingData: !!(bookingMetadata && bookingMetadata.booking_data),
+          hasDirectMetadata: !!(bookingMetadata && bookingMetadata.listing_id && bookingMetadata.user_id),
+          internalStatus: internalStatus,
+          isSuccessfulPayment: (internalStatus === 'deposit_paid' || internalStatus === 'fully_paid')
+        });
         
         // Check if we have booking metadata in the expected format or direct metadata
         const hasValidBookingData = (bookingMetadata && bookingMetadata.booking_data) || 
                                    (bookingMetadata && bookingMetadata.listing_id && bookingMetadata.user_id);
         
         if (bookingMetadata && hasValidBookingData && (internalStatus === 'deposit_paid' || internalStatus === 'fully_paid')) {
+          console.log('Creating booking from webhook metadata for successful payment');
           
           try {
             // Prepare booking data from metadata
@@ -474,16 +534,23 @@ const paymentController = {
               // Ensure datetime fields are properly combined if they're separate
               if (!bookingData.start_datetime && bookingData.start_date && bookingData.start_time) {
                 bookingData.start_datetime = `${bookingData.start_date} ${bookingData.start_time}`;
+                console.log(`Combined start_datetime from booking_data: ${bookingData.start_datetime}`);
               }
               
               if (!bookingData.end_datetime && bookingData.end_date && bookingData.end_time) {
                 bookingData.end_datetime = `${bookingData.end_date} ${bookingData.end_time}`;
+                console.log(`Combined end_datetime from booking_data: ${bookingData.end_datetime}`);
               }
             } else {
               // Create booking data from direct metadata
               // First, check if there's an existing booking for this payment reference
               let existingBooking = null;
               
+              console.log('DEBUG: Looking for existing booking with reference:', reference);
+              console.log('DEBUG: Booking metadata:', {
+                user_id: bookingMetadata.user_id,
+                listing_id: bookingMetadata.listing_id
+              });
               
               try {
                 // Try to find existing booking by reference or user/listing combination
@@ -492,30 +559,49 @@ const paymentController = {
                 // Look for existing bookings with this reference in notes
                 const pool = await db.getPool();
                 const searchPattern = `%${reference}%`;
+                console.log('DEBUG: Searching for bookings with pattern:', searchPattern);
                 
                 const [existingBookings] = await pool.execute(
                   'SELECT * FROM bookings WHERE notes LIKE ? AND user_id = ? AND listing_id = ? ORDER BY created_at DESC LIMIT 1',
                   [searchPattern, bookingMetadata.user_id, bookingMetadata.listing_id]
                 );
                 
+                console.log('DEBUG: Found', existingBookings.length, 'existing bookings');
                 
                 if (existingBookings.length > 0) {
                   existingBooking = existingBookings[0];
-                  
+                  console.log('Found existing booking with reference:', existingBooking.id);
+                  console.log('Existing booking details:', {
+                    id: existingBooking.id,
+                    start_datetime: existingBooking.start_datetime,
+                    end_datetime: existingBooking.end_datetime,
+                    notes: existingBooking.notes
+                  });
                 } else {
+                  console.log('DEBUG: No existing booking found, will create new one');
                   
                   // Also try to find any booking for this user/listing combination
                   const [anyBookings] = await pool.execute(
                     'SELECT id, notes, created_at FROM bookings WHERE user_id = ? AND listing_id = ? ORDER BY created_at DESC LIMIT 3',
                     [bookingMetadata.user_id, bookingMetadata.listing_id]
                   );
-                
+                  console.log('DEBUG: Recent bookings for this user/listing:', anyBookings.map(b => ({
+                    id: b.id,
+                    notes: b.notes,
+                    created_at: b.created_at
+                  })));
                 }
               } catch (error) {
+                console.log('Could not find existing booking:', error.message);
+                console.log('DEBUG: Database error details:', error);
               }
               
               // If we found an existing booking, use its datetime information
               if (existingBooking) {
+                console.log('Using datetime from existing booking:', {
+                  start_datetime: existingBooking.start_datetime,
+                  end_datetime: existingBooking.end_datetime
+                });
                 
                 // Update the existing booking's payment status instead of creating a new one
                 const bookingModel = require('../models/bookingModel');
@@ -523,7 +609,9 @@ const paymentController = {
                   payment_status: internalStatus,
                   status: internalStatus === 'deposit_paid' ? 'confirmed' : existingBooking.status
                 });
-                                
+                
+                console.log(`Updated existing booking ${existingBooking.id} payment status to ${internalStatus}`);
+                
                 return res.status(200).json({
                   status: 'success',
                   message: 'Existing booking payment status updated',
@@ -570,12 +658,15 @@ const paymentController = {
               // Combine date and time if available separately
               if (bookingData.start_date && bookingData.start_time) {
                 bookingData.start_datetime = `${bookingData.start_date} ${bookingData.start_time}`;
+                console.log(`Combined start_datetime: ${bookingData.start_datetime}`);
               }
               
               if (bookingData.end_date && bookingData.end_time) {
                 bookingData.end_datetime = `${bookingData.end_date} ${bookingData.end_time}`;
+                console.log(`Combined end_datetime: ${bookingData.end_datetime}`);
               }
               
+              console.log('Created booking data from direct metadata:', bookingData);
             }
             
             // Add webhook flag to indicate this is a webhook-created booking
@@ -584,6 +675,7 @@ const paymentController = {
             
             // Create the booking using the prepared data
             const booking = await bookingModel.create(bookingData);
+            console.log('Successfully created booking from webhook:', booking.id);
             
             // The booking model automatically created a payment record
             // Now update it with Lahza-specific fields
@@ -608,6 +700,7 @@ const paymentController = {
                 ]
               );
               
+              console.log('Updated payment record with Lahza fields for booking:', booking.id);
             }
             
             // Update booking status to confirmed
@@ -641,11 +734,14 @@ const paymentController = {
         }
         
         // If no metadata or payment failed, just acknowledge the webhook
+        console.log('No booking metadata found or payment not successful');
         return res.status(200).json({
           status: 'success',
           message: 'Webhook received but no matching payment record or booking metadata found'
         });
       }
+
+      console.log('Found payment record:', payment.id);
 
       // Update payment data
       const updateData = {
@@ -663,6 +759,8 @@ const paymentController = {
         updateData.paid_at = paid_at ? new Date(paid_at) : new Date();
       }
 
+      console.log('Updating payment with data:', updateData);
+
       // Update payment
       const updatedPayment = await paymentModel.update(payment.id, updateData);
 
@@ -674,17 +772,22 @@ const paymentController = {
             status: 'confirmed',
             auto_cancel_at: null // Remove auto-cancellation once deposit is paid
           });
+          console.log('Updated booking status to confirmed');
         } else if (internalStatus === 'fully_paid') {
           await bookingModel.update(payment.booking_id, {
             payment_status: 'fully_paid'
           });
+          console.log('Updated booking status to fully paid');
         } else if (internalStatus === 'failed') {
           await bookingModel.update(payment.booking_id, {
             payment_status: 'failed',
             status: 'cancelled'
           });
+          console.log('Updated booking status to cancelled due to failed payment');
         }
       }
+
+      console.log('Webhook processed successfully');
 
       res.status(200).json({
         status: 'success',

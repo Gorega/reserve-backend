@@ -217,7 +217,9 @@ const categoryModel = {
             // Already has time component
             formattedEndDate = endDate.toISOString().slice(0, 19).replace('T', ' ');
           }
-                    
+          
+          console.log(`Filtering dates from ${formattedStartDate} to ${formattedEndDate}`);
+          
           // Exclude listings that have blocked dates during the requested period
           query += `
             AND l.id NOT IN (

@@ -251,20 +251,33 @@ const bookingModel = {
       let finalStartDatetime = start_datetime;
       let finalEndDatetime = end_datetime;
       
+      console.log(`DEBUG: Initial datetime values - start: ${start_datetime}, end: ${end_datetime}`);
+      console.log(`DEBUG: Booking type: ${booking_type}, period: ${booking_period}`);
+      console.log(`DEBUG: Condition check: ${(booking_type === 'daily' || booking_type === 'night') && booking_period && (!start_datetime || !end_datetime)}`);
+      
       // For day/night bookings, automatically determine times if not provided
       // Only use determineBookingTimes if start_datetime and end_datetime are NOT provided
       if ((booking_type === 'daily' || booking_type === 'night') && booking_period && (!start_datetime || !end_datetime)) {
         const isWebhookBooking = bookingData.is_webhook_booking || bookingData.source === 'webhook';
+        console.log(`DEBUG: Calling determineBookingTimes for listing ${listing_id}, date ${selected_date}, period ${booking_period}, webhook: ${isWebhookBooking}`);
         
         const bookingTimes = await this.determineBookingTimes(listing_id, selected_date, booking_period, isWebhookBooking);
+        console.log(`DEBUG: determineBookingTimes returned:`, bookingTimes);
         
         // Check if bookingTimes is not null before accessing its properties
         if (bookingTimes && bookingTimes.start_datetime && bookingTimes.end_datetime) {
           finalStartDatetime = bookingTimes.start_datetime;
           finalEndDatetime = bookingTimes.end_datetime;
+          console.log(`DEBUG: Updated datetime values - start: ${finalStartDatetime}, end: ${finalEndDatetime}`);
+        } else {
+          console.log(`Using provided start/end times as determineBookingTimes returned null or incomplete data`);
+          // Keep the original values if bookingTimes is null or incomplete
         }
       }
-            
+      
+      // Log the exact times being used
+      console.log(`Using booking times: ${finalStartDatetime} to ${finalEndDatetime}`);
+      
       // Check if the time slot is already booked or not available
       // If booking_type is 'night' but booking_period is also provided, allow for more flexible availability check
       const isNightBooking = booking_type === 'night' || booking_period === 'night';
@@ -273,11 +286,13 @@ const bookingModel = {
       let availabilityCheck;
       
       if (isNightBooking) {
+        console.log('Checking availability for night booking with flexible mode');
         // First try with 'night' booking type
         availabilityCheck = await this.checkAvailability(listing_id, finalStartDatetime, finalEndDatetime, 'night', booking_period);
         
         // If not available as night, try with 'daily' booking type
         if (!availabilityCheck.available) {
+          console.log('Night availability not found, trying with daily booking type');
           availabilityCheck = await this.checkAvailability(listing_id, finalStartDatetime, finalEndDatetime, 'daily', booking_period);
         }
       } else {
@@ -290,6 +305,7 @@ const bookingModel = {
       
       if (!availabilityCheck.available) {
         if (isWebhookBooking) {
+          console.log(`Webhook booking: Proceeding despite availability issue: ${availabilityCheck.reason}`);
           // For webhook bookings, we'll proceed but log the issue
           // This allows payment-confirmed bookings to be created even if availability records are missing
         } else {
@@ -299,6 +315,7 @@ const bookingModel = {
       
       // If we're booking a night slot but found a daily slot, adjust the booking_type
       if (isNightBooking && availabilityCheck.effectiveBookingType === 'daily') {
+        console.log('Adjusting booking_type from night to daily based on available slot');
         booking_type = 'daily';
       }
       
@@ -346,7 +363,10 @@ const bookingModel = {
       // Format dates for MySQL - preserve the exact times provided
       const formattedStartDatetime = this.formatDateForMySQL(finalStartDatetime);
       const formattedEndDatetime = this.formatDateForMySQL(finalEndDatetime);
-            
+      
+      // Log the formatted times to verify they're correct
+      console.log(`Formatted booking times: ${formattedStartDatetime} to ${formattedEndDatetime}`);
+      
       // For appointment bookings, atomically assign a ticket number within the transaction
       let ticketNumber = null;
       if (booking_type === 'appointment' && host_id && connection) {
@@ -364,6 +384,7 @@ const bookingModel = {
         const [ticketResult] = await connection.query(ticketQuery, [listing_id, host_id, formattedStartDatetime]);
         ticketNumber = ticketResult[0].next_ticket;
         
+        console.log(`Generated ticket number: ${ticketNumber} for appointment booking`);
       }
       
       // Calculate booking duration and total price
@@ -447,7 +468,10 @@ const bookingModel = {
               }
             );
           }
-                    
+          
+          // Log the selected pricing option for debugging
+          console.log(`Selected pricing option: ${JSON.stringify(selectedPricingOption)}, units: ${unitsBooked}, total price: ${totalPrice}`);
+          
         } catch (smartPricingError) {
           console.error('Error with smart pricing, falling back to legacy pricing:', smartPricingError);
           
@@ -606,7 +630,9 @@ const bookingModel = {
       if (!bookingId) {
         throw new Error('Failed to create booking - no booking ID returned');
       }
-            
+      
+      console.log(`Successfully created booking with ID: ${bookingId}`);
+      
       // For appointment bookings, create appointment queue entry within the transaction
       if (booking_type === 'appointment' && host_id && ticketNumber && connection) {
         const queueQuery = `INSERT INTO appointment_queue (
@@ -666,6 +692,7 @@ const bookingModel = {
             [paymentData.booking_id, paymentData.method, paymentData.amount, paymentData.deposit_amount, paymentData.remaining_amount, paymentData.payment_deadline, paymentData.status]
           );
           
+          console.log(`Payment record created for booking ${bookingId} with method: ${bookingData.payment_method}`);
         } catch (paymentError) {
           console.error('Error creating payment record:', paymentError);
           // Don't fail the booking creation if payment record creation fails
@@ -767,6 +794,10 @@ const bookingModel = {
         effectiveBookingType = 'night';
       }
       
+      // Log the availability check parameters for debugging
+      console.log(`Checking availability for listing ${listing_id} from ${formattedStartDatetime} to ${formattedEndDatetime}`);
+      console.log(`Booking type: ${effectiveBookingType}`);
+      
       // Special handling for night bookings
       let conflictQuery;
       let conflictParams;
@@ -774,6 +805,7 @@ const bookingModel = {
       if (effectiveBookingType === 'night') {
         // For night bookings, we need a more flexible conflict check
         // A night booking typically spans from evening to morning the next day
+        console.log('Using night booking conflict detection logic');
         
         // Extract the date parts for date-based comparison
         const startDate = formattedStartDatetime.split(' ')[0]; // YYYY-MM-DD
@@ -822,6 +854,8 @@ const bookingModel = {
       const bookingConflicts = await db.query(conflictQuery, conflictParams);
       
       if (bookingConflicts.length > 0) {
+        console.log('Found booking conflicts:', bookingConflicts.map(b => 
+          `ID: ${b.id}, Type: ${b.booking_type}, Time: ${b.start_datetime} - ${b.end_datetime}`).join(', '));
         
         return { 
           available: false, 
@@ -871,6 +905,7 @@ const bookingModel = {
       const blockedDates = await db.query(blockedQuery, blockedParams);
       
       if (blockedDates.length > 0) {
+        console.log('Found blocked dates:', blockedDates);
         
         return { 
           available: false, 
@@ -882,9 +917,11 @@ const bookingModel = {
       // Check if there's explicit availability for this time slot
       // This depends on the listing's availability mode
       const availabilityMode = listings[0].availability_mode || 'available-by-default';
+      console.log(`Availability mode: ${availabilityMode}`);
       
       // For available-by-default mode, we assume the slot is available unless blocked
       if (availabilityMode === 'available-by-default') {
+        console.log('Using available-by-default mode - slot is available');
         // We've already checked for conflicts and blocks above, so we're good
         return { 
           available: true,
@@ -894,6 +931,7 @@ const bookingModel = {
       
       // For blocked-by-default mode, we need to find explicit availability
       if (availabilityMode === 'blocked-by-default') {
+        console.log('Using blocked-by-default mode - checking for explicit availability');
         
         // Different availability checks based on booking type
         if (effectiveBookingType === 'night') {
@@ -917,6 +955,8 @@ const bookingModel = {
             `;
             
             const nightSlots = await db.query(nightSlotsQuery, [listing_id, startDate, startDate, startDate]);
+            console.log(`Found ${nightSlots.length} night slots in available_slots table:`, 
+              nightSlots.map(s => `${s.id}: ${s.start_datetime} - ${s.end_datetime} (${s.booking_type || 'unknown'})`).join(', '));
             
             if (nightSlots.length > 0) {
               // Return the booking type of the first matching slot
@@ -938,6 +978,8 @@ const bookingModel = {
             `;
             
             const legacyNightSlots = await db.query(legacyNightQuery, [listing_id, startDate]);
+            console.log(`Found ${legacyNightSlots.length} night slots in legacy availability table:`, 
+              legacyNightSlots.map(s => `${s.id}: ${s.date} ${s.start_time} - ${s.end_time}`).join(', '));
             
             if (legacyNightSlots.length > 0) {
               return { 
@@ -958,8 +1000,10 @@ const bookingModel = {
             const listingModeResult = await db.query(listingModeQuery, [listing_id]);
             if (listingModeResult.length > 0) {
               const actualMode = listingModeResult[0].actual_mode;
+              console.log(`Listing ${listing_id} actual availability mode: ${actualMode}`);
               
               if (actualMode === 'available-by-default') {
+                console.log('Listing is actually in available-by-default mode, allowing booking');
                 return { 
                   available: true,
                   effectiveBookingType: booking_type || 'daily'
@@ -997,7 +1041,9 @@ const bookingModel = {
             listing_id,
             formattedStartDatetime, formattedStartDatetime, formattedEndDatetime
           ]);
-                    
+          
+          console.log(`Found ${availabilitySlots.length} matching slots in availability table`);
+          
           // If found in availability table, we're good
           if (availabilitySlots.length > 0) {
             return { available: true };
@@ -1023,6 +1069,8 @@ const bookingModel = {
               formattedEndDatetime, formattedEndDatetime       // Slot ends after or at booking end and covers end
             ]);
             
+            console.log(`Found ${availableSlots.length} matching slots in available_slots table:`, 
+              availableSlots.map(s => `${s.start_datetime} - ${s.end_datetime}`).join(', '));
             
             if (availableSlots.length === 0) {
               return { 
@@ -1288,9 +1336,11 @@ const bookingModel = {
       `;
       
       const availability = await db.query(availabilityQuery, [listing_id, selected_date, selected_date]);
+      console.log(`DEBUG: Availability query returned ${availability.length} records:`, availability);
       
       if (availability.length === 0) {
         const bookingSource = isWebhookBooking ? ' (webhook booking)' : '';
+        console.log(`No availability records found for listing ${listing_id} on ${selected_date}${bookingSource}, using fallback times`);
         
         // Fallback logic: provide default times based on booking_period and unit_type
         let defaultStartTime, defaultEndTime;
@@ -1321,6 +1371,7 @@ const bookingModel = {
           end_datetime: `${endDate} ${defaultEndTime}`
         };
         
+        console.log(`DEBUG: determineBookingTimes returning fallback times:`, fallbackResult);
         return fallbackResult;
       }
       
@@ -1351,6 +1402,7 @@ const bookingModel = {
         end_datetime: selectedSlot.unified_end_datetime
       };
       
+      console.log(`DEBUG: determineBookingTimes returning:`, result);
       return result;
       
     } catch (error) {

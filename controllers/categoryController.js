@@ -199,6 +199,8 @@ const categoryController = {
 
       // Add combined search filter if provided
       if (req.query.search) filters.search = req.query.search;
+
+      console.log(`Getting listings for category ${id} with filters:`, filters);
       
       const listings = await categoryModel.getListings(id, page, limit, includeSubcategories, filters);
       

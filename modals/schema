@@ -537,6 +537,16 @@ CREATE TABLE appointment_queue (
     UNIQUE KEY unique_ticket_per_slot (listing_id, host_id, slot_datetime, ticket_number)
 );
 
+CREATE TABLE blocked_ranges (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  listing_id INT NOT NULL,
+  start_datetime DATETIME NOT NULL,
+  end_datetime DATETIME NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+  INDEX idx_blocked_ranges_listing_datetime (listing_id, start_datetime, end_datetime),
+  INDEX idx_blocked_ranges_datetime_range (start_datetime, end_datetime)
+);
 
 
 -- Insert main categories first

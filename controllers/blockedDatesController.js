@@ -16,10 +16,13 @@ const blockedDatesController = {
   async getBlockedDates(req, res, next) {
     try {
       const { listingId } = req.params;
-            
+      
+      console.log(`[DEBUG] Getting blocked dates for listing ${listingId}`);
+      
       // Check if listing exists
       const listing = await db.getById('listings', listingId);
       if (!listing) {
+        console.log(`[ERROR] Listing ${listingId} not found`);
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found'
@@ -34,13 +37,23 @@ const blockedDatesController = {
       
       const availabilityMode = listingSettings.length > 0 ? 
         listingSettings[0].availability_mode : 'available-by-default';
-            
+      
+      console.log(`[DEBUG] Listing ${listingId} availability mode: ${availabilityMode}`);
+      
       let blockedDates = [];
-            
+      
+      // Get booked dates for this listing (pending and confirmed bookings)
+      console.log(`[DEBUG] Fetching booked dates for listing ${listingId}`);
+      
       const bookedDates = await db.query(
         'SELECT id, listing_id, start_datetime, end_datetime, status, created_at FROM bookings WHERE listing_id = ? AND status IN (?, ?)',
         [listingId, 'pending', 'confirmed']
       );
+      
+      console.log(`[DEBUG] Found ${bookedDates.length} booked dates for listing ${listingId}`);
+      if (bookedDates.length > 0) {
+        console.log(`[DEBUG] First booked date:`, bookedDates[0]);
+      }
       
       if (availabilityMode === 'available-by-default') {
         // In available-by-default mode, return explicitly blocked dates
@@ -49,10 +62,16 @@ const blockedDatesController = {
           [listingId]
         );
         
+        // CRITICAL FIX: Also fetch availability data from availability table
+        console.log(`[DEBUG] Fetching availability data from availability table for listing ${listingId}`);
         const availabilityData = await db.query(
           'SELECT * FROM availability WHERE listing_id = ? ORDER BY date ASC, start_time ASC',
           [listingId]
         );
+        console.log(`[DEBUG] Found ${availabilityData.length} availability entries`);
+        if (availabilityData.length > 0) {
+          console.log(`[DEBUG] First availability entry:`, availabilityData[0]);
+        }
         
         // Format blocked dates to match the same format as available dates
         blockedDates = rawBlockedDates.map(blocked => {
@@ -154,7 +173,9 @@ const blockedDatesController = {
             primary_date: null
           };
         });
-                
+        
+        console.log(`[DEBUG] Formatted ${formattedBookedDates.length} booked dates`);
+        
         // Step 2: Process availability data and add it to the response
         const formattedAvailabilityData = availabilityData.map(available => {
           try {
@@ -224,10 +245,18 @@ const blockedDatesController = {
             };
           }
         });
-                
+        
+        console.log(`[DEBUG] Formatted ${formattedAvailabilityData.length} availability entries`);
+        
         // Combine regular blocked dates with booked dates and availability data
         blockedDates = [...blockedDates, ...formattedBookedDates, ...formattedAvailabilityData];
-              
+        
+        console.log(`[DEBUG] Total entries after combining: ${blockedDates.length}`);
+        console.log(`[DEBUG] Breakdown: ${blockedDates.length - formattedBookedDates.length - formattedAvailabilityData.length} manually blocked, ${formattedBookedDates.length} from bookings, ${formattedAvailabilityData.length} from availability`);
+        
+        if (formattedBookedDates.length > 0) {
+          console.log(`[DEBUG] First booked date:`, formattedBookedDates[0]);
+        }
       } else {
         // In blocked-by-default mode, only return manually blocked dates and booked dates
         // Do NOT include available dates as they are not blocked
@@ -259,15 +288,21 @@ const blockedDatesController = {
         
         // Only include manually blocked dates and booked dates
         blockedDates = [...blockedDates, ...formattedBookedDates];
+        console.log(`[DEBUG] Blocked-by-default mode: ${blockedDates.length - formattedBookedDates.length} manually blocked, ${formattedBookedDates.length} booked dates`);
       }
-            
+      
+      // CRITICAL FIX: Log the response we're about to send
+      console.log(`[DEBUG] Sending response with ${blockedDates.length} blocked dates`);
+      
       // Make sure bookedInFinal is defined for the blocked-by-default mode as well
       const bookedInFinal = blockedDates.filter(date => 
         (date.is_booked === true) || 
         (date.reason && date.reason.includes('Booked')) || 
         (date.id && typeof date.id === 'string' && date.id.includes('booking-'))
       );
-            
+      
+      console.log(`[DEBUG] Blocked dates breakdown: ${blockedDates.length - bookedInFinal.length} manually blocked, ${bookedInFinal.length} from bookings`);
+      
       // Ensure we have the correct structure
       const responseData = {
         status: 'success',
@@ -275,6 +310,15 @@ const blockedDatesController = {
         data: blockedDates,
         availability_mode: availabilityMode // Include mode in response
       };
+      
+      // Log the first few items to verify structure
+      if (blockedDates.length > 0) {
+        console.log(`[DEBUG] First blocked date in response:`, blockedDates[0]);
+      }
+      
+      if (bookedInFinal.length > 0) {
+        console.log(`[DEBUG] First booked date in response:`, bookedInFinal[0]);
+      }
       
       res.status(200).json(responseData);
     } catch (error) {
@@ -292,10 +336,13 @@ const blockedDatesController = {
   async getGuestAvailability(req, res, next) {
     try {
       const { listingId } = req.params;
-            
+      
+      console.log(`[DEBUG] Getting guest availability for listing ${listingId}`);
+      
       // Check if listing exists
       const listing = await db.getById('listings', listingId);
       if (!listing) {
+        console.log(`[ERROR] Listing ${listingId} not found`);
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found'
@@ -310,13 +357,17 @@ const blockedDatesController = {
       
       const availabilityMode = listingSettings.length > 0 ? 
         listingSettings[0].availability_mode : 'available-by-default';
-            
+      
+      console.log(`[DEBUG] Listing ${listingId} availability mode: ${availabilityMode}`);
+      
       // Get booked dates (confirmed and pending bookings)
       const bookedDates = await db.query(
         'SELECT id, listing_id, start_datetime, end_datetime, status, created_at FROM bookings WHERE listing_id = ? AND status IN (?, ?)',
         [listingId, 'pending', 'confirmed']
       );
-            
+      
+      console.log(`[DEBUG] Found ${bookedDates.length} booked dates for listing ${listingId}`);
+      
       // Get blocked dates
       const blockedDates = await db.query(
         'SELECT * FROM blocked_dates WHERE listing_id = ? ORDER BY start_datetime ASC',
@@ -328,7 +379,9 @@ const blockedDatesController = {
         'SELECT * FROM availability WHERE listing_id = ? ORDER BY date ASC, start_time ASC',
         [listingId]
       );
-            
+      
+      console.log(`[DEBUG] Found ${availabilityData.length} availability entries`);
+      
       // Format response data for guest calendar
       const response = {
         availability_mode: availabilityMode,

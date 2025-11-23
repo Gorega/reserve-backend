@@ -675,7 +675,9 @@ const getPublicAvailableSlots = async (listingId, startDate, endDate, options = 
       // Make sure we're using the actual duration value, not defaulting to 60
       const slotDurationMinutes = parseInt(listing.slot_duration) || 180; // Default to 3 hours if not set
       const durationMs = slotDurationMinutes * 60 * 1000; // Convert minutes to milliseconds
-            
+      
+      console.log(`Using slot duration of ${slotDurationMinutes} minutes for listing ${listingId}`);
+      
       const hourlySlots = [];
       
       // Process each available slot
@@ -686,15 +688,25 @@ const getPublicAvailableSlots = async (listingId, startDate, endDate, options = 
           end: new Date(slot.end_datetime).getTime(),
           id: slot.id
         }];
-                
+        
+        // Log the original range for debugging
+        console.log(`Original slot range: ${new Date(availableRanges[0].start).toISOString()} - ${new Date(availableRanges[0].end).toISOString()}`);
+        
         // Subtract overlapping reservations
         for (const reservation of reservations) {
           const resStart = new Date(reservation.start_datetime).getTime();
           const resEnd = new Date(reservation.end_datetime).getTime();
           
+          console.log(`Processing reservation: ${new Date(resStart).toISOString()} - ${new Date(resEnd).toISOString()}`);
           availableRanges = subtractTimeRange(availableRanges, resStart, resEnd);
         }
-      
+        
+        // Log the available ranges after subtracting reservations
+        console.log(`After subtracting reservations, ${availableRanges.length} ranges remain:`);
+        availableRanges.forEach((range, i) => {
+          console.log(`  Range ${i+1}: ${new Date(range.start).toISOString()} - ${new Date(range.end).toISOString()}`);
+        });
+        
         // Subtract overlapping blocked ranges
         for (const blocked of blockedRanges) {
           const blockStart = new Date(blocked.start_datetime).getTime();
@@ -819,6 +831,8 @@ const subtractTimeRange = (ranges, subtractStart, subtractEnd) => {
       });
     }
     
+    // Log the subtraction for debugging
+    console.log(`Subtracted time range ${new Date(subtractStart).toISOString()} - ${new Date(subtractEnd).toISOString()} from slot`);
   }
   
   return result;

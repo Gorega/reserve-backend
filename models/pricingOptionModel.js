@@ -201,13 +201,6 @@ const pricingOptionModel = {
         await conn.beginTransaction();
       }
       
-      // Before deleting pricing options, we need to handle foreign key constraints
-      // Set pricing_option_id to NULL for any bookings that reference the pricing options we're about to delete
-      await conn.query(
-        'UPDATE bookings SET pricing_option_id = NULL WHERE pricing_option_id IN (SELECT id FROM pricing_options WHERE listing_id = ?)',
-        [listingId]
-      );
-      
       // Clear existing options for this listing
       await conn.query('DELETE FROM pricing_options WHERE listing_id = ?', [listingId]);
       
