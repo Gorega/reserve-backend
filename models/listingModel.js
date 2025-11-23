@@ -722,20 +722,26 @@ const listingModel = {
           
           if (existingPropertyDetails.length === 0) {
             // Insert property details only if they don't exist
+            const mg = max_guests != null ? Math.round(parseFloat(max_guests)) : null;
+            const br = bedrooms != null ? Math.round(parseFloat(bedrooms)) : null;
+            const bd = beds != null ? Math.round(parseFloat(beds)) : null;
+            const ba = bathrooms != null ? Math.round(parseFloat(bathrooms)) : null;
+            const mn = min_nights != null ? Math.round(parseFloat(min_nights)) : 1;
+            const mxn = max_nights != null ? Math.round(parseFloat(max_nights)) : null;
             await connection.query(
               `INSERT INTO listing_property_details (
                 listing_id, max_guests, bedrooms, beds, bathrooms, property_type, room_type, min_nights, max_nights
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 listingId,
-                max_guests || null,
-                bedrooms || null,
-                beds || null,
-                bathrooms || null,
+                mg,
+                br,
+                bd,
+                ba,
                 property_type || 'other',
                 room_type || null,
-                min_nights || 1,
-                max_nights || null
+                mn,
+                mxn
               ]
             );
           }
@@ -1070,13 +1076,13 @@ const listingModel = {
         
         // Process property-specific fields
         if (listingData.property_type) property_details.property_type = listingData.property_type;
-        if (listingData.max_guests) property_details.max_guests = listingData.max_guests;
-        if (listingData.bedrooms) property_details.bedrooms = listingData.bedrooms;
-        if (listingData.beds) property_details.beds = listingData.beds;
-        if (listingData.bathrooms) property_details.bathrooms = listingData.bathrooms;
+        if (listingData.max_guests) property_details.max_guests = Math.round(parseFloat(listingData.max_guests));
+        if (listingData.bedrooms) property_details.bedrooms = Math.round(parseFloat(listingData.bedrooms));
+        if (listingData.beds) property_details.beds = Math.round(parseFloat(listingData.beds));
+        if (listingData.bathrooms) property_details.bathrooms = Math.round(parseFloat(listingData.bathrooms));
         if (listingData.room_type) property_details.room_type = listingData.room_type;
-        if (listingData.min_nights) property_details.min_nights = listingData.min_nights;
-        if (listingData.max_nights) property_details.max_nights = listingData.max_nights;
+        if (listingData.min_nights) property_details.min_nights = Math.round(parseFloat(listingData.min_nights));
+        if (listingData.max_nights) property_details.max_nights = Math.round(parseFloat(listingData.max_nights));
         
         // Process car-specific fields
         if (listingData.brand) car_details.brand = listingData.brand;

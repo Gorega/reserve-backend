@@ -833,13 +833,13 @@ const listingController = {
           
           // Add individual property fields that might be at the root level
           if (listingData.property_type) propertyDetails.property_type = listingData.property_type;
-          if (listingData.max_guests) propertyDetails.max_guests = listingData.max_guests;
-          if (listingData.bedrooms) propertyDetails.bedrooms = listingData.bedrooms;
-          if (listingData.beds) propertyDetails.beds = listingData.beds;
-          if (listingData.bathrooms) propertyDetails.bathrooms = listingData.bathrooms;
+          if (listingData.max_guests) propertyDetails.max_guests = Math.round(parseFloat(listingData.max_guests));
+          if (listingData.bedrooms) propertyDetails.bedrooms = Math.round(parseFloat(listingData.bedrooms));
+          if (listingData.beds) propertyDetails.beds = Math.round(parseFloat(listingData.beds));
+          if (listingData.bathrooms) propertyDetails.bathrooms = Math.round(parseFloat(listingData.bathrooms));
           if (listingData.room_type) propertyDetails.room_type = listingData.room_type;
-          if (listingData.min_nights) propertyDetails.min_nights = listingData.min_nights;
-          if (listingData.max_nights) propertyDetails.max_nights = listingData.max_nights;
+          if (listingData.min_nights) propertyDetails.min_nights = Math.round(parseFloat(listingData.min_nights));
+          if (listingData.max_nights) propertyDetails.max_nights = Math.round(parseFloat(listingData.max_nights));
           
           // Check if property details exist
           const [existingPropertyDetails] = await connection.query(
