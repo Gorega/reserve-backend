@@ -425,7 +425,14 @@ const listingModel = {
         `;
         const propertyDetails = await db.query(propertyQuery, [id]);
         if (propertyDetails.length > 0) {
-          listing.property_details = propertyDetails[0];
+          const pd = propertyDetails[0];
+          if (pd.max_guests != null) pd.max_guests = Math.round(parseFloat(pd.max_guests));
+          if (pd.bedrooms != null) pd.bedrooms = Math.round(parseFloat(pd.bedrooms));
+          if (pd.beds != null) pd.beds = Math.round(parseFloat(pd.beds));
+          if (pd.bathrooms != null) pd.bathrooms = Math.round(parseFloat(pd.bathrooms));
+          if (pd.min_nights != null) pd.min_nights = Math.round(parseFloat(pd.min_nights));
+          if (pd.max_nights != null) pd.max_nights = Math.round(parseFloat(pd.max_nights));
+          listing.property_details = pd;
         }
       } else if (listing.listing_type === 'vehicle') {
         const carQuery = `
