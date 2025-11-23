@@ -2865,15 +2865,19 @@ const hostController = {
       const today = new Date().toISOString().split('T')[0];
             
       const todayReservations = await db.query(`
-        SELECT b.id, b.id as booking_id, b.start_datetime as check_in_date, b.end_datetime as check_out_date, b.status, 
+        SELECT b.id, b.id as booking_id, b.start_datetime as check_in_date, b.end_datetime as check_out_date, b.status,
                b.guests_count as guests, b.total_price, b.created_at,
-               l.id as listing_id, l.title, l.location, 
+               l.id as listing_id, l.title, l.location,
                (SELECT image_url FROM listing_photos WHERE listing_id = l.id AND is_cover = 1 LIMIT 1) as primary_image,
-               u.id as guest_id, u.name as guest_name, u.profile_image as guest_profile_image
+               u.id as guest_id, u.name as guest_name, u.profile_image as guest_profile_image,
+               p.amount as paid_amount, p.status as payment_status, p.paid_at as payment_paid_at
         FROM bookings b
         JOIN listings l ON b.listing_id = l.id
         JOIN users u ON b.user_id = u.id
-        WHERE l.user_id = ? 
+        LEFT JOIN payments p ON b.id = p.booking_id AND p.id = (
+          SELECT MAX(id) FROM payments WHERE booking_id = b.id
+        )
+        WHERE l.user_id = ?
         AND (
           (DATE(b.start_datetime) <= ? AND DATE(b.end_datetime) >= ?) OR
           (DATE(b.start_datetime) = ?)
@@ -2904,6 +2908,7 @@ const hostController = {
           status: booking.status,
           guests: booking.guests,
           total_price: booking.total_price,
+          paid_amount: booking.paid_amount,
           created_at: booking.created_at,
           listing: {
             id: booking.listing_id,
@@ -2945,16 +2950,20 @@ const hostController = {
       const thirtyDaysLaterStr = thirtyDaysLater.toISOString().split('T')[0];
             
       const upcomingReservations = await db.query(`
-        SELECT b.id, b.id as booking_id, b.start_datetime as check_in_date, b.end_datetime as check_out_date, b.status, 
+        SELECT b.id, b.id as booking_id, b.start_datetime as check_in_date, b.end_datetime as check_out_date, b.status,
                b.guests_count as guests, b.total_price, b.created_at,
-               l.id as listing_id, l.title, l.location, 
+               l.id as listing_id, l.title, l.location,
                (SELECT image_url FROM listing_photos WHERE listing_id = l.id AND is_cover = 1 LIMIT 1) as primary_image,
-               u.id as guest_id, u.name as guest_name, u.profile_image as guest_profile_image
+               u.id as guest_id, u.name as guest_name, u.profile_image as guest_profile_image,
+               p.amount as paid_amount, p.status as payment_status, p.paid_at as payment_paid_at
         FROM bookings b
         JOIN listings l ON b.listing_id = l.id
         JOIN users u ON b.user_id = u.id
-        WHERE l.user_id = ? 
-        AND DATE(b.start_datetime) > ? 
+        LEFT JOIN payments p ON b.id = p.booking_id AND p.id = (
+          SELECT MAX(id) FROM payments WHERE booking_id = b.id
+        )
+        WHERE l.user_id = ?
+        AND DATE(b.start_datetime) > ?
         AND DATE(b.start_datetime) <= ?
         AND b.status IN ('pending', 'confirmed', 'completed')
         ORDER BY b.start_datetime ASC
@@ -2982,6 +2991,7 @@ const hostController = {
           status: booking.status,
           guests: booking.guests,
           total_price: booking.total_price,
+           paid_amount: booking.paid_amount,
           created_at: booking.created_at,
           listing: {
             id: booking.listing_id,

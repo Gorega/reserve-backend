@@ -251,7 +251,6 @@ router.get(
  * @access  Public
  */
 router.get('/:id/appointment-slots-test', (req, res) => {
-  console.log('🧪 Test endpoint accessed:', req.params, req.query);
   res.json({
     status: 'success',
     message: 'Test endpoint working',

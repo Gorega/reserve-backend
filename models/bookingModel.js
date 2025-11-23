@@ -33,6 +33,11 @@ const bookingModel = {
                l.user_id as provider_id,
                p.id as payment_id,
                p.method as payment_method,
+               p.amount as paid_amount,
+               p.deposit_amount,
+               p.remaining_amount,
+               p.paid_at as payment_paid_at,
+               p.status as payment_status,
                COALESCE(p.status, b.payment_status) as payment_status_actual,
                (SELECT image_url FROM listing_photos WHERE listing_id = l.id AND is_cover = 1 LIMIT 1) as listing_cover_photo
         FROM bookings b

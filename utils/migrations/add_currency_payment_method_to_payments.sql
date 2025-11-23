@@ -2,7 +2,6 @@
 -- This migration adds the missing currency and payment_method fields
 
 ALTER TABLE payments 
-ADD COLUMN currency VARCHAR(10) DEFAULT 'ILS' AFTER lahza_access_code,
 ADD COLUMN payment_method VARCHAR(50) NULL AFTER currency;
 
 -- Add index for faster lookups by currency
