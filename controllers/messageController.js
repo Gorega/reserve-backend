@@ -101,34 +101,70 @@ exports.getUserConversations = async (req, res, next) => {
         u.name,
         u.profile_image,
         (
-          SELECT l2.id
-          FROM messages m2
-          LEFT JOIN listings l2 ON m2.listing_id = l2.id
-          WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
-            AND m2.listing_id IS NOT NULL
-          ORDER BY m2.sent_at DESC
-          LIMIT 1
+          SELECT COALESCE(
+            (
+              SELECT l2.id
+              FROM messages m2
+              LEFT JOIN listings l2 ON m2.listing_id = l2.id
+              WHERE ((m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?))
+                AND m2.listing_id IS NOT NULL
+              ORDER BY m2.sent_at DESC
+              LIMIT 1
+            ),
+            (
+              SELECT b2.listing_id
+              FROM bookings b2
+              JOIN listings l2 ON l2.id = b2.listing_id
+              WHERE (b2.user_id = u.id AND l2.user_id = ?) OR (b2.user_id = ? AND l2.user_id = u.id)
+              ORDER BY b2.created_at DESC
+              LIMIT 1
+            )
+          )
         ) as listing_id,
         (
-          SELECT l2.title
-          FROM messages m2
-          LEFT JOIN listings l2 ON m2.listing_id = l2.id
-          WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
-            AND m2.listing_id IS NOT NULL
-          ORDER BY m2.sent_at DESC
-          LIMIT 1
+          SELECT COALESCE(
+            (
+              SELECT l2.title
+              FROM messages m2
+              LEFT JOIN listings l2 ON m2.listing_id = l2.id
+              WHERE ((m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?))
+                AND m2.listing_id IS NOT NULL
+              ORDER BY m2.sent_at DESC
+              LIMIT 1
+            ),
+            (
+              SELECT l2.title
+              FROM bookings b2
+              JOIN listings l2 ON l2.id = b2.listing_id
+              WHERE (b2.user_id = u.id AND l2.user_id = ?) OR (b2.user_id = ? AND l2.user_id = u.id)
+              ORDER BY b2.created_at DESC
+              LIMIT 1
+            )
+          )
         ) as listing_title,
         (
           SELECT image_url 
           FROM listing_photos lp
           WHERE lp.listing_id = (
-            SELECT l3.id
-            FROM messages m3
-            LEFT JOIN listings l3 ON m3.listing_id = l3.id
-            WHERE (m3.sender_id = ? AND m3.receiver_id = u.id) OR (m3.sender_id = u.id AND m3.receiver_id = ?)
-              AND m3.listing_id IS NOT NULL
-            ORDER BY m3.sent_at DESC
-            LIMIT 1
+            SELECT COALESCE(
+              (
+                SELECT l3.id
+                FROM messages m3
+                LEFT JOIN listings l3 ON m3.listing_id = l3.id
+                WHERE ((m3.sender_id = ? AND m3.receiver_id = u.id) OR (m3.sender_id = u.id AND m3.receiver_id = ?))
+                  AND m3.listing_id IS NOT NULL
+                ORDER BY m3.sent_at DESC
+                LIMIT 1
+              ),
+              (
+                SELECT b3.listing_id
+                FROM bookings b3
+                JOIN listings l3 ON l3.id = b3.listing_id
+                WHERE (b3.user_id = u.id AND l3.user_id = ?) OR (b3.user_id = ? AND l3.user_id = u.id)
+                ORDER BY b3.created_at DESC
+                LIMIT 1
+              )
+            )
           )
           AND lp.is_cover = 1
           LIMIT 1
@@ -164,12 +200,25 @@ exports.getUserConversations = async (req, res, next) => {
       GROUP BY u.id, u.name, u.profile_image
       ORDER BY last_message_time DESC
     `, [
+      // listing_id from messages
       req.user.id, req.user.id,
+      // listing_id from bookings
       req.user.id, req.user.id,
+      // listing_title from messages
       req.user.id, req.user.id,
+      // listing_title from bookings
       req.user.id, req.user.id,
+      // listing_image via messages
       req.user.id, req.user.id,
+      // listing_image via bookings
+      req.user.id, req.user.id,
+      // last_message
+      req.user.id, req.user.id,
+      // last_message_time
+      req.user.id, req.user.id,
+      // unread_count receiver
       req.user.id,
+      // JOIN messages params
       req.user.id, req.user.id
     ]).catch(error => {
       // If error is about is_read column, try without it
@@ -180,34 +229,70 @@ exports.getUserConversations = async (req, res, next) => {
             u.name,
             u.profile_image,
             (
-              SELECT l2.id
-              FROM messages m2
-              LEFT JOIN listings l2 ON m2.listing_id = l2.id
-              WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
-                AND m2.listing_id IS NOT NULL
-              ORDER BY m2.sent_at DESC
-              LIMIT 1
+              SELECT COALESCE(
+                (
+                  SELECT l2.id
+                  FROM messages m2
+                  LEFT JOIN listings l2 ON m2.listing_id = l2.id
+                  WHERE ((m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?))
+                    AND m2.listing_id IS NOT NULL
+                  ORDER BY m2.sent_at DESC
+                  LIMIT 1
+                ),
+                (
+                  SELECT b2.listing_id
+                  FROM bookings b2
+                  JOIN listings l2 ON l2.id = b2.listing_id
+                  WHERE (b2.user_id = u.id AND l2.user_id = ?) OR (b2.user_id = ? AND l2.user_id = u.id)
+                  ORDER BY b2.created_at DESC
+                  LIMIT 1
+                )
+              )
             ) as listing_id,
             (
-              SELECT l2.title
-              FROM messages m2
-              LEFT JOIN listings l2 ON m2.listing_id = l2.id
-              WHERE (m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?)
-                AND m2.listing_id IS NOT NULL
-              ORDER BY m2.sent_at DESC
-              LIMIT 1
+              SELECT COALESCE(
+                (
+                  SELECT l2.title
+                  FROM messages m2
+                  LEFT JOIN listings l2 ON m2.listing_id = l2.id
+                  WHERE ((m2.sender_id = ? AND m2.receiver_id = u.id) OR (m2.sender_id = u.id AND m2.receiver_id = ?))
+                    AND m2.listing_id IS NOT NULL
+                  ORDER BY m2.sent_at DESC
+                  LIMIT 1
+                ),
+                (
+                  SELECT l2.title
+                  FROM bookings b2
+                  JOIN listings l2 ON l2.id = b2.listing_id
+                  WHERE (b2.user_id = u.id AND l2.user_id = ?) OR (b2.user_id = ? AND l2.user_id = u.id)
+                  ORDER BY b2.created_at DESC
+                  LIMIT 1
+                )
+              )
             ) as listing_title,
             (
               SELECT image_url 
               FROM listing_photos lp
               WHERE lp.listing_id = (
-                SELECT l3.id
-                FROM messages m3
-                LEFT JOIN listings l3 ON m3.listing_id = l3.id
-                WHERE (m3.sender_id = ? AND m3.receiver_id = u.id) OR (m3.sender_id = u.id AND m3.receiver_id = ?)
-                  AND m3.listing_id IS NOT NULL
-                ORDER BY m3.sent_at DESC
-                LIMIT 1
+                SELECT COALESCE(
+                  (
+                    SELECT l3.id
+                    FROM messages m3
+                    LEFT JOIN listings l3 ON m3.listing_id = l3.id
+                    WHERE ((m3.sender_id = ? AND m3.receiver_id = u.id) OR (m3.sender_id = u.id AND m3.receiver_id = ?))
+                      AND m3.listing_id IS NOT NULL
+                    ORDER BY m3.sent_at DESC
+                    LIMIT 1
+                  ),
+                  (
+                    SELECT b3.listing_id
+                    FROM bookings b3
+                    JOIN listings l3 ON l3.id = b3.listing_id
+                    WHERE (b3.user_id = u.id AND l3.user_id = ?) OR (b3.user_id = ? AND l3.user_id = u.id)
+                    ORDER BY b3.created_at DESC
+                    LIMIT 1
+                  )
+                )
               )
               AND lp.is_cover = 1
               LIMIT 1
@@ -242,12 +327,25 @@ exports.getUserConversations = async (req, res, next) => {
           GROUP BY u.id, u.name, u.profile_image
           ORDER BY last_message_time DESC
         `, [
+          // listing_id from messages
           req.user.id, req.user.id,
+          // listing_id from bookings
           req.user.id, req.user.id,
+          // listing_title from messages
           req.user.id, req.user.id,
+          // listing_title from bookings
           req.user.id, req.user.id,
+          // listing_image via messages
           req.user.id, req.user.id,
+          // listing_image via bookings
+          req.user.id, req.user.id,
+          // last_message
+          req.user.id, req.user.id,
+          // last_message_time
+          req.user.id, req.user.id,
+          // unread_count receiver
           req.user.id,
+          // JOIN messages params
           req.user.id, req.user.id
         ]);
       }
