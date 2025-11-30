@@ -63,10 +63,7 @@ const server = http.createServer(app);
 const corsOptions = {
   origin: [
     'http://localhost:3000',
-    'http://localhost:19000', // Expo development server
-    'http://localhost:19001',
-    'http://localhost:19002',
-    'http://localhost:19006',
+    'https://click.up.railway.app',
     'exp://*', // Expo Go app
     process.env.FRONTEND_URL || '*'
   ],
@@ -153,6 +150,20 @@ app.use((req, res, next) => {
   next();
 });
 
+const CURRENT_VERSION = '1.7.0';
+
+app.get('/api/app-version', (req, res) => {
+  res.json({
+    version: CURRENT_VERSION,
+    forceUpdate: false, // Set to true to force update, false to make it optional
+    updateMessage: {
+      en: 'A new version of the app is available. Please update to continue using the app.',
+      ar: 'يتوفر إصدار جديد من التطبيق. يرجى التحديث لمواصلة استخدام التطبيق.',
+      he: 'יש גרסה חדשה של האפליקציה. נא לעדכן כדי להמשיך להשתמש בה.'
+    }
+  });
+});
+
 // API routes
 app.use('/api/users', userRoutes);
 app.use('/api/listings', listingRoutes);
@@ -181,10 +192,10 @@ app.get('/', (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  
+
   const statusCode = err.statusCode || 500;
   let message = err.message || 'Internal Server Error';
-  
+
   // Handle validation errors with originalMessage
   if (err.originalMessage && err.originalMessage.errors) {
     return res.status(statusCode).json({
@@ -194,11 +205,20 @@ app.use((err, req, res, next) => {
       errors: err.originalMessage.errors
     });
   }
-  
+
   res.status(statusCode).json({
     status: 'error',
     statusCode,
     message
+  });
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    api: 'operational',
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -208,5 +228,11 @@ server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Uploads directory: ${path.join(__dirname, uploadDir)}`);
 });
+
+// Server configuration with keep-alive
+// Extended timeouts to support external API calls
+server.keepAliveTimeout = 370000; // 370 seconds (6+ minutes)
+server.headersTimeout = 371000; // 371 seconds (slightly higher than keepAlive)
+server.timeout = 370000; // 370 seconds server timeout
 
 module.exports = { app, server, io }; // For testing purposes
