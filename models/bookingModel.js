@@ -562,7 +562,7 @@ const bookingModel = {
       totalPrice = Number(totalPrice) || 0;
       
       // Calculate platform commission (default 10%)
-      const platformCommissionPercent = 10;
+      const platformCommissionPercent = 20;
       const platformCommission = (totalPrice * platformCommissionPercent) / 100;
       
       // Calculate provider earnings

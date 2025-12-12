@@ -609,7 +609,8 @@ INSERT INTO amenities (name, icon, category, description) VALUES
 ('Washer', 'washer', 'property', 'Laundry washer available'),
 ('Hot Tub', 'hot_tub', 'property', 'Private or shared hot tub'),
 ('Elevator', 'elevator', 'property', 'Elevator available in building'),
-('Gym', 'gym', 'property', 'Access to a gym or fitness area');
+('Gym', 'gym', 'property', 'Access to a gym or fitness area'),
+('Hot Water', 'hot_water', 'property', 'Hot water in the pool');
 
 
 INSERT INTO house_rules (name, icon, description) VALUES
