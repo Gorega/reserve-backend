@@ -579,7 +579,7 @@ const bookingModel = {
       const payment_status = bookingData.payment_status || 'unpaid';
       
       // Calculate deposit amount (default 20% of total)
-      const depositPercent = 20;
+      const depositPercent = 30;
       const depositAmount = (totalPrice * depositPercent) / 100;
       const remainingAmount = totalPrice - depositAmount;
       
