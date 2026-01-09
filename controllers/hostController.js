@@ -869,6 +869,26 @@ const subtractTimeRange = (ranges, subtractStart, subtractEnd) => {
   return result;
 };
 
+const getDoctorIdForListing = (listing) => {
+  if (!listing) return null;
+  const doctorUserId = listing.doctor_user_id ? parseInt(listing.doctor_user_id, 10) : null;
+  if (doctorUserId) return doctorUserId;
+  const isDoctorListing = parseInt(listing.is_doctor_listing, 10) === 1;
+  if (isDoctorListing && listing.user_id) return parseInt(listing.user_id, 10);
+  return null;
+};
+
+const userCanManageListing = (listing, userId) => {
+  if (!listing || !userId) return false;
+
+  const normalizedUserId = parseInt(userId, 10);
+  const listingOwnerId = listing.user_id ? parseInt(listing.user_id, 10) : null;
+  if (listingOwnerId && listingOwnerId === normalizedUserId) return true;
+
+  const doctorUserId = listing.doctor_user_id ? parseInt(listing.doctor_user_id, 10) : null;
+  return doctorUserId === normalizedUserId;
+};
+
 /**
  * Host Controller
  * Handles HTTP requests for host operations
@@ -1542,13 +1562,13 @@ const hostController = {
       const isDoctorListing = req.query.is_doctor_listing === 'true';
 
       let query = `
-        SELECT l.id, l.title, l.price_per_hour, l.price_per_day, l.location, l.rating, l.review_count,
+        SELECT DISTINCT l.id, l.user_id, l.title, l.price_per_hour, l.price_per_day, l.location, l.rating, l.review_count,
           l.is_doctor_listing, l.doctor_user_id,
           (SELECT image_url FROM listing_photos WHERE listing_id = l.id AND is_cover = 1 LIMIT 1) as primary_image
         FROM listings l
-        WHERE l.user_id = ?`;
+        WHERE (l.user_id = ? OR l.doctor_user_id = ?)`;
 
-      const queryParams = [userId];
+      const queryParams = [userId, userId];
 
       if (req.query.is_doctor_listing !== undefined) {
         query += ` AND l.is_doctor_listing = ?`;
@@ -1583,11 +1603,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
@@ -1667,11 +1687,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
@@ -1773,11 +1793,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
@@ -2326,11 +2346,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
@@ -2385,11 +2405,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
@@ -2457,6 +2477,9 @@ const hostController = {
           });
         }
 
+        const listingDoctorId = getDoctorIdForListing(listing);
+        const targetDoctorId = getDoctorIdForListing(target);
+
         if (parseInt(listing.is_doctor_listing, 10) === 0) {
           if (parseInt(target.is_doctor_listing, 10) !== 1) {
             return res.status(400).json({
@@ -2464,7 +2487,7 @@ const hostController = {
               message: 'paired_listing_id must be a doctor listing'
             });
           }
-          if (!listing.doctor_user_id || parseInt(listing.doctor_user_id, 10) !== parseInt(target.user_id, 10)) {
+          if (!listingDoctorId || !targetDoctorId || listingDoctorId !== targetDoctorId) {
             return res.status(400).json({
               status: 'error',
               message: 'paired_listing_id must belong to the clinic doctor_user_id'
@@ -2477,7 +2500,7 @@ const hostController = {
               message: 'paired_listing_id must be a clinic listing'
             });
           }
-          if (target.doctor_user_id && parseInt(target.doctor_user_id, 10) !== parseInt(listing.user_id, 10)) {
+          if (!target.doctor_user_id || !listingDoctorId || parseInt(target.doctor_user_id, 10) !== listingDoctorId) {
             return res.status(400).json({
               status: 'error',
               message: 'paired_listing_id clinic is assigned to another doctor'
@@ -2613,11 +2636,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
@@ -2724,11 +2747,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
@@ -2779,11 +2802,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
@@ -2836,11 +2859,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
@@ -2888,11 +2911,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
@@ -2926,11 +2949,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
@@ -2991,11 +3014,11 @@ const hostController = {
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
-        'SELECT * FROM listings WHERE id = ? AND user_id = ?',
-        [listingId, userId]
+        'SELECT * FROM listings WHERE id = ?',
+        [listingId]
       );
 
-      if (!listing) {
+      if (!userCanManageListing(listing, userId)) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not owned by you'
