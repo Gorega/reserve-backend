@@ -129,6 +129,11 @@ const listingModel = {
           params.push(filters.user_id);
         }
 
+        if (filters.doctor_user_id) {
+          filterConditions.push('l.doctor_user_id = ?');
+          params.push(filters.doctor_user_id);
+        }
+
         if (filters.is_doctor_listing !== undefined) {
           filterConditions.push('l.is_doctor_listing = ?');
           params.push(filters.is_doctor_listing ? 1 : 0);

@@ -1500,6 +1500,7 @@ const hostController = {
 
       let query = `
         SELECT l.id, l.title, l.price_per_hour, l.price_per_day, l.location, l.rating, l.review_count,
+          l.is_doctor_listing, l.doctor_user_id,
           (SELECT image_url FROM listing_photos WHERE listing_id = l.id AND is_cover = 1 LIMIT 1) as primary_image
         FROM listings l
         WHERE l.user_id = ?`;
@@ -2337,7 +2338,7 @@ const hostController = {
     try {
       const userId = req.user.id;
       const { listingId } = req.params;
-      const { start_datetime, end_datetime, slot_type, price_override, booking_type, slot_duration } = req.body;
+      const { start_datetime, end_datetime, slot_type, price_override, booking_type, slot_duration, paired_listing_id } = req.body;
 
       // Check if listing exists and belongs to user
       const [listing] = await db.query(
@@ -2373,6 +2374,7 @@ const hostController = {
           slot_duration INT NULL,
           is_available BOOLEAN DEFAULT TRUE,
           original_availability_id INT NULL,
+          origin_listing_id INT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
@@ -2382,9 +2384,66 @@ const hostController = {
         )
       `);
 
+      try {
+        const [col] = await db.query(
+          `SELECT COUNT(*) as cnt
+           FROM information_schema.columns
+           WHERE table_schema = DATABASE()
+           AND table_name = 'available_slots'
+           AND column_name = 'origin_listing_id'`
+        );
+        if ((col?.cnt || 0) === 0) {
+          await db.query('ALTER TABLE available_slots ADD COLUMN origin_listing_id INT NULL');
+        }
+      } catch (schemaError) {
+      }
+
       // Convert datetime strings to proper MySQL format without timezone conversion
-      const startDate = start_datetime.includes('T') ? start_datetime.replace('T', ' ') : start_datetime;
-      const endDate = end_datetime.includes('T') ? end_datetime.replace('T', ' ') : end_datetime;
+      const startDate = toMySQLDateTime(start_datetime);
+      const endDate = toMySQLDateTime(end_datetime);
+
+      let pairedListing = null;
+      const pairedListingId = paired_listing_id ? parseInt(paired_listing_id, 10) : null;
+
+      if (pairedListingId) {
+        const [target] = await db.query('SELECT id, user_id, is_doctor_listing, doctor_user_id, title FROM listings WHERE id = ? AND active = 1', [pairedListingId]);
+        if (!target) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid paired_listing_id'
+          });
+        }
+
+        if (parseInt(listing.is_doctor_listing, 10) === 0) {
+          if (parseInt(target.is_doctor_listing, 10) !== 1) {
+            return res.status(400).json({
+              status: 'error',
+              message: 'paired_listing_id must be a doctor listing'
+            });
+          }
+          if (!listing.doctor_user_id || parseInt(listing.doctor_user_id, 10) !== parseInt(target.user_id, 10)) {
+            return res.status(400).json({
+              status: 'error',
+              message: 'paired_listing_id must belong to the clinic doctor_user_id'
+            });
+          }
+        } else {
+          if (parseInt(target.is_doctor_listing, 10) !== 0) {
+            return res.status(400).json({
+              status: 'error',
+              message: 'paired_listing_id must be a clinic listing'
+            });
+          }
+          if (!target.doctor_user_id || parseInt(target.doctor_user_id, 10) !== parseInt(listing.user_id, 10)) {
+            return res.status(400).json({
+              status: 'error',
+              message: 'paired_listing_id clinic must be assigned to this doctor'
+            });
+          }
+        }
+
+        pairedListing = target;
+      }
 
       // Check for conflicts with existing bookings
       const conflictingBookings = await checkReservationConflicts(listingId, startDate, endDate);
@@ -2415,7 +2474,8 @@ const hostController = {
         price_override: price_override || null,
         booking_type: booking_type || null,
         slot_duration: slot_duration || null,
-        is_available: true
+        is_available: true,
+        origin_listing_id: null
       });
 
       // Get the created slot
@@ -2442,11 +2502,16 @@ const hostController = {
         if (targetDoctorId) {
           console.log(`Synchronizing availability for Doctor ID: ${targetDoctorId} from Listing ${listingId}`);
 
-          // Find other listings associated with this doctor (Profile or Assigned Clinics)
-          const otherListings = await db.query(
-            'SELECT id, title FROM listings WHERE ((user_id = ? AND is_doctor_listing = 1) OR doctor_user_id = ?) AND id != ?',
-            [targetDoctorId, targetDoctorId, listingId]
-          );
+          let otherListings = [];
+
+          if (pairedListing) {
+            otherListings = [pairedListing];
+          } else {
+            otherListings = await db.query(
+              'SELECT id, title FROM listings WHERE ((user_id = ? AND is_doctor_listing = 1) OR doctor_user_id = ?) AND id != ?',
+              [targetDoctorId, targetDoctorId, listingId]
+            );
+          }
 
           console.log(`Found ${otherListings.length} other listings to sync:`, otherListings.map(l => l.id));
 
@@ -2466,7 +2531,7 @@ const hostController = {
                 booking_type: booking_type || null,
                 slot_duration: slot_duration || null,
                 is_available: true,
-                origin_listing_id: listingId // Track that this slot came from the original listing
+                origin_listing_id: listingId
               });
               console.log(`Synced slot to Listing ${otherListing.id}`);
             } else {
@@ -2562,6 +2627,40 @@ const hostController = {
         status: 'success',
         message: 'Available slot deleted successfully'
       });
+
+      try {
+        const slotStart = slot.start_datetime;
+        const slotEnd = slot.end_datetime;
+
+        if (slot.origin_listing_id) {
+          const originListingId = slot.origin_listing_id;
+
+          await db.query(
+            `DELETE FROM available_slots
+             WHERE origin_listing_id = ?
+             AND start_datetime = ?
+             AND end_datetime = ?`,
+            [originListingId, slotStart, slotEnd]
+          );
+
+          await db.query(
+            `DELETE FROM available_slots
+             WHERE listing_id = ?
+             AND start_datetime = ?
+             AND end_datetime = ?`,
+            [originListingId, slotStart, slotEnd]
+          );
+        } else {
+          await db.query(
+            `DELETE FROM available_slots
+             WHERE origin_listing_id = ?
+             AND start_datetime = ?
+             AND end_datetime = ?`,
+            [listingId, slotStart, slotEnd]
+          );
+        }
+      } catch (syncDeleteError) {
+      }
 
     } catch (error) {
       console.error('Error deleting available slot:', error);
@@ -2809,6 +2908,7 @@ const hostController = {
             slot_duration INT NULL,
             is_available BOOLEAN DEFAULT TRUE,
             original_availability_id INT NULL,
+            origin_listing_id INT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
@@ -2872,6 +2972,7 @@ const hostController = {
           slot_duration INT NULL,
           is_available BOOLEAN DEFAULT TRUE,
           original_availability_id INT NULL,
+          origin_listing_id INT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
@@ -2883,6 +2984,20 @@ const hostController = {
       `;
 
       await db.query(createTableSQL);
+
+      try {
+        const [col] = await db.query(
+          `SELECT COUNT(*) as cnt
+           FROM information_schema.columns
+           WHERE table_schema = DATABASE()
+           AND table_name = 'available_slots'
+           AND column_name = 'origin_listing_id'`
+        );
+        if ((col?.cnt || 0) === 0) {
+          await db.query('ALTER TABLE available_slots ADD COLUMN origin_listing_id INT NULL');
+        }
+      } catch (schemaError) {
+      }
 
       // Now synchronize the data
       await cleanupAvailableSlots(listingId);
@@ -2899,6 +3014,7 @@ const hostController = {
           slot_duration,
           is_available,
           original_availability_id,
+          origin_listing_id,
           created_at,
           updated_at
         FROM available_slots 

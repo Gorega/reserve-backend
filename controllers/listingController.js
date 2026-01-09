@@ -29,6 +29,7 @@ const listingController = {
       if (req.query.category_id) filters.category_id = parseInt(req.query.category_id);
       if (req.query.main_category_id) filters.main_category_id = parseInt(req.query.main_category_id);
       if (req.query.user_id) filters.user_id = parseInt(req.query.user_id);
+      if (req.query.doctor_user_id) filters.doctor_user_id = parseInt(req.query.doctor_user_id);
       if (req.query.min_price) filters.min_price = parseFloat(req.query.min_price);
       if (req.query.max_price) filters.max_price = parseFloat(req.query.max_price);
       if (req.query.location) filters.location = req.query.location;
