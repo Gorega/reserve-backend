@@ -2422,6 +2422,53 @@ const hostController = {
         [result.insertId]
       );
 
+      // Synchronize availability with other doctor listings
+      try {
+        let targetDoctorId = listing.doctor_user_id;
+        // If it's a doctor profile, use the owner's ID
+        if (!targetDoctorId && (listing.is_doctor_listing === 1 || listing.is_doctor_listing === true)) {
+          targetDoctorId = listing.user_id;
+        }
+
+        if (targetDoctorId) {
+          console.log(`Synchronizing availability for Doctor ID: ${targetDoctorId} from Listing ${listingId}`);
+
+          // Find other listings associated with this doctor (Profile or Assigned Clinics)
+          const otherListings = await db.query(
+            'SELECT id, title FROM listings WHERE ((user_id = ? AND is_doctor_listing = 1) OR doctor_user_id = ?) AND id != ?',
+            [targetDoctorId, targetDoctorId, listingId]
+          );
+
+          console.log(`Found ${otherListings.length} other listings to sync:`, otherListings.map(l => l.id));
+
+          // Replicate slot to other listings
+          for (const otherListing of otherListings) {
+            // Check for conflicts in the target listing
+            const conflicts = await checkReservationConflicts(otherListing.id, startDate, endDate);
+            const blocked = await checkBlockedDateConflicts(otherListing.id, startDate, endDate);
+
+            if (conflicts.length === 0 && blocked.length === 0) {
+              await db.insert('available_slots', {
+                listing_id: otherListing.id,
+                start_datetime: startDate,
+                end_datetime: endDate,
+                slot_type: slot_type || 'regular',
+                price_override: price_override || null,
+                booking_type: booking_type || null,
+                slot_duration: slot_duration || null,
+                is_available: true
+              });
+              console.log(`Synced slot to Listing ${otherListing.id}`);
+            } else {
+              console.log(`Skipped sync to Listing ${otherListing.id} due to conflicts`);
+            }
+          }
+        }
+      } catch (syncError) {
+        console.error('Error synchronizing doctor availability:', syncError);
+        // Continue response even if sync fails
+      }
+
 
       res.status(201).json({
         status: 'success',
