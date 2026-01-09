@@ -165,6 +165,17 @@ router.get(
 );
 
 /**
+ * @route   GET /api/users/search
+ * @desc    Search for doctor users by name or phone
+ * @access  Private
+ */
+router.get(
+  '/search',
+  protect,
+  userController.searchDoctors
+);
+
+/**
  * @route   GET /api/users/:id
  * @desc    Get user by ID
  * @access  Private

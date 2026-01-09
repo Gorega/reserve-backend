@@ -659,14 +659,15 @@ const listingModel = {
         // Insert listing
         const listingResult = await connection.query(
           `INSERT INTO listings (
-            user_id, category_id, listing_type, is_doctor_listing, title, description, price_per_hour, price_per_day, price_per_half_night,
+            user_id, category_id, listing_type, is_doctor_listing, doctor_user_id, title, description, price_per_hour, price_per_day, price_per_half_night,
             unit_type, is_hourly, location, latitude, longitude, instant_booking, cancellation_policy, slot_duration, booking_type
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             user_id,
             category_id,
             listing_type,
             is_doctor_listing ? 1 : 0,
+            listingData.doctor_user_id || null,
             title,
             description,
             price_per_hour || null,
@@ -1050,7 +1051,7 @@ const listingModel = {
 
         // Define the fields that belong to the main listings table
         const validListingFields = [
-          'user_id', 'category_id', 'listing_type', 'is_doctor_listing', 'title', 'description',
+          'user_id', 'category_id', 'listing_type', 'is_doctor_listing', 'doctor_user_id', 'title', 'description',
           'price_per_hour', 'price_per_day', 'price_per_half_night', 'unit_type',
           'is_hourly', 'location', 'latitude', 'longitude', 'instant_booking',
           'cancellation_policy', 'rating', 'review_count', 'active'

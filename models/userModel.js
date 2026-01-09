@@ -639,6 +639,34 @@ const userModel = {
     return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
       expiresIn: process.env.JWT_EXPIRES_IN || '7d'
     });
+  },
+
+  /**
+   * Search for doctor users by name or phone
+   * @param {string} searchQuery - Search query (name or phone)
+   * @returns {Promise<Array>} - List of matching doctor users
+   */
+  async searchDoctors(searchQuery) {
+    try {
+      const query = `
+        SELECT id, name, email, phone, profile_image, is_doctor, created_at
+        FROM users
+        WHERE is_doctor = 1
+        AND (
+          name LIKE ? OR
+          phone LIKE ?
+        )
+        LIMIT 20
+      `;
+
+      const searchPattern = `%${searchQuery}%`;
+      const doctors = await db.query(query, [searchPattern, searchPattern]);
+
+      return doctors;
+    } catch (error) {
+      console.error('Error searching doctors:', error);
+      throw error;
+    }
   }
 };
 

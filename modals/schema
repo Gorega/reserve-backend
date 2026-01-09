@@ -25,6 +25,7 @@ CREATE TABLE listings (
     category_id INT NOT NULL,
     listing_type ENUM('property', 'vehicle', 'service') NOT NULL,
     is_doctor_listing BOOLEAN DEFAULT FALSE,
+    doctor_user_id INT NULL, -- Links to the doctor user for doctor listings
     title VARCHAR(200) NOT NULL,
     description TEXT,
     price_per_hour DECIMAL(10,2),
@@ -44,7 +45,8 @@ CREATE TABLE listings (
     active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (category_id) REFERENCES categories(id)
+    FOREIGN KEY (category_id) REFERENCES categories(id),
+    FOREIGN KEY (doctor_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- New table for pricing options

@@ -22,7 +22,7 @@ const userController = {
       // Limit the maximum number of records to prevent performance issues
       const limit = Math.min(parseInt(req.query.limit, 10) || 10, 100);
       const filters = {};
-      
+
       // Add filters if provided
       if (req.query.name) filters.name = String(req.query.name);
       if (req.query.email) filters.email = String(req.query.email);
@@ -31,16 +31,16 @@ const userController = {
         // Convert string 'true'/'false' to boolean
         filters.is_provider = req.query.is_provider === 'true';
       }
-      
-      
+
+
       // Get users with explicit number parameters
       const users = await userModel.getAll(filters, Number(page), Number(limit));
-      
+
       // Count total users for pagination with safe parameters
       // Use a reasonable limit for counting to prevent performance issues
       const countQuery = await userModel.getAll(filters, 1, 1000);
       const totalCount = countQuery.length;
-      
+
       res.status(200).json({
         status: 'success',
         results: users.length,
@@ -54,7 +54,7 @@ const userController = {
       next(error);
     }
   },
-  
+
   /**
    * Get user by ID
    * @param {Object} req - Express request object
@@ -65,7 +65,7 @@ const userController = {
     try {
       const { id } = req.params;
       const user = await userModel.getById(id);
-      
+
       res.status(200).json({
         status: 'success',
         data: user
@@ -74,7 +74,7 @@ const userController = {
       next(error);
     }
   },
-  
+
   /**
    * Get current user profile
    * @param {Object} req - Express request object
@@ -92,7 +92,7 @@ const userController = {
       next(error);
     }
   },
-  
+
   /**
    * Create a new user
    * @param {Object} req - Express request object
@@ -103,7 +103,7 @@ const userController = {
     try {
       const userData = req.body;
       const language = getLanguageFromRequest(req);
-      
+
       // Handle file upload if present
       if (req.file) {
         try {
@@ -125,9 +125,9 @@ const userController = {
           return sendResponse(res, 400, 'error', 'UPLOAD_FAILED', language);
         }
       }
-      
+
       const user = await userModel.create(userData);
-      
+
       return sendResponse(res, 201, 'success', 'USER_CREATED', language, user);
     } catch (error) {
       // Delete uploaded file if there was an error
@@ -137,7 +137,7 @@ const userController = {
       next(error);
     }
   },
-  
+
   /**
    * Update a user
    * @param {Object} req - Express request object
@@ -149,7 +149,7 @@ const userController = {
       const { id } = req.params;
       const userData = req.body;
       const language = getLanguageFromRequest(req);
-      
+
       // Handle file upload if present
       if (req.file) {
         try {
@@ -162,9 +162,9 @@ const userController = {
               { quality: 'auto' }
             ]
           });
-          
+
           userData.profile_image = cloudinaryResult.secure_url;
-          
+
           // Get existing user to delete old profile image from Cloudinary
           const existingUser = await userModel.getById(id);
           if (existingUser.profile_image && existingUser.profile_image.includes('cloudinary.com')) {
@@ -195,9 +195,9 @@ const userController = {
           }
         }
       }
-      
+
       const user = await userModel.update(id, userData);
-      
+
       return sendResponse(res, 200, 'success', 'USER_UPDATED', language, user);
     } catch (error) {
       // Delete uploaded file if there was an error
@@ -207,7 +207,7 @@ const userController = {
       next(error);
     }
   },
-  
+
   /**
    * Update current user profile
    * @param {Object} req - Express request object
@@ -217,7 +217,7 @@ const userController = {
   async updateProfile(req, res, next) {
     try {
       const userData = req.body;
-      
+
       // Handle file upload if present
       if (req.file) {
         try {
@@ -230,9 +230,9 @@ const userController = {
               { quality: 'auto' }
             ]
           });
-          
+
           userData.profile_image = cloudinaryResult.secure_url;
-          
+
           // Delete old profile image from Cloudinary
           if (req.user.profile_image && req.user.profile_image.includes('cloudinary.com')) {
             try {
@@ -261,9 +261,9 @@ const userController = {
           }
         }
       }
-      
+
       const user = await userModel.update(req.user.id, userData);
-      
+
       res.status(200).json({
         status: 'success',
         data: user
@@ -276,7 +276,7 @@ const userController = {
       next(error);
     }
   },
-  
+
   /**
    * Delete a user
    * @param {Object} req - Express request object
@@ -286,24 +286,24 @@ const userController = {
   async delete(req, res, next) {
     try {
       const { id } = req.params;
-      
+
       // Get user to delete profile image
       const user = await userModel.getById(id);
-      
+
       await userModel.delete(id);
-      
+
       // Delete profile image if exists
       if (user.profile_image) {
         const filename = user.profile_image.split('/').pop();
         deleteFile(filename);
       }
-      
+
       res.status(204).end();
     } catch (error) {
       next(error);
     }
   },
-  
+
   /**
    * User login
    * @param {Object} req - Express request object
@@ -314,13 +314,13 @@ const userController = {
     try {
       const { identifier, password } = req.body;
       const language = getLanguageFromRequest(req);
-      
+
       if (!identifier) {
         return sendResponse(res, 400, 'error', 'PHONE_EMAIL_REQUIRED', language);
       }
-      
+
       const user = await userModel.login(identifier, password, res);
-      
+
       res.status(200).json({
         status: 'success',
         data: user
@@ -339,17 +339,17 @@ const userController = {
   async logout(req, res, next) {
     try {
       const language = getLanguageFromRequest(req);
-      
+
       // Clear cookies
       res.clearCookie('token', {
         httpOnly: true,
         path: '/'
       });
-      
+
       res.clearCookie('signed', {
         path: '/'
       });
-      
+
       return sendResponse(res, 200, 'success', 'LOGGED_OUT_SUCCESS', language);
     } catch (error) {
       next(error);
@@ -366,10 +366,10 @@ const userController = {
     try {
       // Get current user ID from auth middleware
       const userId = req.user.id;
-      
+
       // Update user to become a provider
       const updatedUser = await userModel.becomeHost(userId);
-      
+
       res.status(200).json({
         status: 'success',
         data: updatedUser
@@ -389,13 +389,13 @@ const userController = {
     try {
       const { token } = req.params;
       const language = getLanguageFromRequest(req);
-      
+
       if (!token) {
         return sendResponse(res, 400, 'error', 'VERIFICATION_TOKEN_REQUIRED', language);
       }
-      
+
       const user = await userModel.verifyEmail(token, language);
-      
+
       return sendResponse(res, 200, 'success', 'EMAIL_VERIFIED_SUCCESS', language, {
         user: {
           id: user.id,
@@ -419,13 +419,13 @@ const userController = {
     try {
       const { email } = req.body;
       const language = getLanguageFromRequest(req);
-      
+
       if (!email) {
         return sendResponse(res, 400, 'error', 'EMAIL_REQUIRED', language);
       }
-      
+
       const success = await userModel.resendVerificationEmail(email, language);
-      
+
       if (success) {
         return sendResponse(res, 200, 'success', 'VERIFICATION_EMAIL_SENT', language);
       } else {
@@ -446,7 +446,7 @@ const userController = {
     try {
       const { email } = req.body;
       const language = getLanguageFromRequest(req);
-      
+
       if (!email) {
         return sendResponse(res, 400, 'error', 'EMAIL_REQUIRED', language);
       }
@@ -456,9 +456,9 @@ const userController = {
       if (!emailRegex.test(email)) {
         return sendResponse(res, 400, 'error', 'INVALID_EMAIL', language);
       }
-      
+
       const success = await userModel.generatePasswordResetCode(email.toLowerCase().trim(), language);
-      
+
       if (success) {
         return sendResponse(res, 200, 'success', 'PASSWORD_RESET_CODE_SENT', language);
       } else {
@@ -479,7 +479,7 @@ const userController = {
     try {
       const { email, code } = req.body;
       const language = getLanguageFromRequest(req);
-      
+
       if (!email || !code) {
         return sendResponse(res, 400, 'error', 'EMAIL_CODE_REQUIRED', language);
       }
@@ -494,9 +494,9 @@ const userController = {
       if (!/^\d{6}$/.test(code)) {
         return sendResponse(res, 400, 'error', 'INVALID_VERIFICATION_CODE', language);
       }
-      
+
       const user = await userModel.verifyPasswordResetCode(email.toLowerCase().trim(), code);
-      
+
       if (user) {
         return sendResponse(res, 200, 'success', 'VERIFICATION_CODE_VALID', language);
       }
@@ -515,7 +515,7 @@ const userController = {
     try {
       const { email, code, newPassword } = req.body;
       const language = getLanguageFromRequest(req);
-      
+
       if (!email || !code || !newPassword) {
         return sendResponse(res, 400, 'error', 'EMAIL_CODE_PASSWORD_REQUIRED', language);
       }
@@ -535,19 +535,52 @@ const userController = {
       if (newPassword.length < 6) {
         return sendResponse(res, 400, 'error', 'PASSWORD_MIN_LENGTH', language);
       }
-      
+
       const success = await userModel.resetPasswordWithCode(
-        email.toLowerCase().trim(), 
-        code, 
+        email.toLowerCase().trim(),
+        code,
         newPassword
       );
-      
+
       if (success) {
         return sendResponse(res, 200, 'success', 'PASSWORD_RESET_SUCCESS', language);
       } else {
         return sendResponse(res, 500, 'error', 'PASSWORD_RESET_FAILED', language);
       }
     } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
+   * Search for doctor users
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async searchDoctors(req, res, next) {
+    try {
+      const { q } = req.query; // Search query (name or phone)
+
+      if (!q || q.trim().length < 2) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Search query must be at least 2 characters long'
+        });
+      }
+
+      const searchQuery = q.trim();
+
+      // Search for users with is_doctor=true matching name or phone
+      const doctors = await userModel.searchDoctors(searchQuery);
+
+      res.status(200).json({
+        status: 'success',
+        results: doctors.length,
+        data: doctors
+      });
+    } catch (error) {
+      console.error('Error searching doctors:', error);
       next(error);
     }
   }
@@ -562,7 +595,7 @@ const userController = {
 const updateProfileImage = async (req, res, next) => {
   try {
     const language = getLanguageFromRequest(req);
-    
+
     // Check if file was uploaded
     if (!req.file) {
       return sendResponse(res, 400, 'error', 'NO_IMAGE_PROVIDED', language);
