@@ -1562,7 +1562,7 @@ const hostController = {
       const isDoctorListing = req.query.is_doctor_listing === 'true';
 
       let query = `
-        SELECT DISTINCT l.id, l.user_id, l.title, l.price_per_hour, l.price_per_day, l.location, l.rating, l.review_count,
+        SELECT l.id, l.user_id, l.title, l.price_per_hour, l.price_per_day, l.location, l.rating, l.review_count,
           l.is_doctor_listing, l.doctor_user_id,
           (SELECT image_url FROM listing_photos WHERE listing_id = l.id AND is_cover = 1 LIMIT 1) as primary_image
         FROM listings l
