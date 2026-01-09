@@ -2427,10 +2427,10 @@ const hostController = {
         const doctorUserId = listing.doctor_user_id;
 
         if (doctorUserId) {
-          // Find other listings associated with this doctor
+          // Find other listings associated with this doctor (by assignment or ownership)
           const otherListings = await db.query(
-            'SELECT id FROM listings WHERE doctor_user_id = ? AND id != ?',
-            [doctorUserId, listingId]
+            'SELECT id FROM listings WHERE (doctor_user_id = ? OR (user_id = ? AND is_doctor_listing = 1)) AND id != ?',
+            [doctorUserId, doctorUserId, listingId]
           );
 
           // Replicate slot to other listings
