@@ -1769,8 +1769,50 @@ const listingController = {
       // Import the getPublicAvailableSlots function from hostController which already handles duration-based splitting
       const { getPublicAvailableSlots } = require('./hostController');
 
-      // Get available slots using the enhanced public logic that handles slot duration correctly
-      const availableSlots = await getPublicAvailableSlots(id, start_date, end_date);
+      // NEW AGGREGATION LOGIC:
+      // If this is a Doctor Profile, we need to fetch slots from ALL listings where this doctor works.
+      let listingsToCheck = [{ id: parseInt(id), title: listing.title }];
+      let allSlots = [];
+
+      // Check if this is a Doctor Listing (Doctor Profile)
+      const isDoctorProfile = listing.is_doctor_listing === 1 || listing.is_doctor_listing === true;
+
+      if (isDoctorProfile) {
+        // Identify the doctor user (owner of this profile)
+        const doctorUserId = listing.user_id;
+
+        // Find ALL other listings linked to this doctor (where doctor_user_id = doctorUserId)
+        const linkedListings = await db.query(
+          'SELECT id, title FROM listings WHERE doctor_user_id = ? AND id != ? AND active = 1',
+          [doctorUserId, id]
+        );
+
+        if (linkedListings.length > 0) {
+          listingsToCheck = [...listingsToCheck, ...linkedListings];
+        }
+      }
+
+      // Fetch slots for all identified listings and aggregate them
+      for (const item of listingsToCheck) {
+        try {
+          const slots = await getPublicAvailableSlots(item.id, start_date, end_date);
+
+          // Enrich slots with origin information so frontend can display "Available at Clinic X"
+          const enrichedSlots = slots.map(s => ({
+            ...s,
+            origin_listing_id: item.id,
+            origin_listing_title: item.title,
+            is_aggregated: item.id !== parseInt(id)
+          }));
+
+          allSlots = [...allSlots, ...enrichedSlots];
+        } catch (err) {
+          console.error(`Failed to fetch slots for listing ${item.id} during aggregation:`, err);
+          // Continue fetching others even if one fails
+        }
+      }
+
+      const availableSlots = allSlots;
 
       res.status(200).json({
         status: 'success',
