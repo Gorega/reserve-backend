@@ -2422,6 +2422,42 @@ const hostController = {
         [result.insertId]
       );
 
+      // Synchronize availability with other doctor listings
+      try {
+        const doctorUserId = listing.doctor_user_id;
+
+        if (doctorUserId) {
+          // Find other listings associated with this doctor
+          const otherListings = await db.query(
+            'SELECT id FROM listings WHERE doctor_user_id = ? AND id != ?',
+            [doctorUserId, listingId]
+          );
+
+          // Replicate slot to other listings
+          for (const otherListing of otherListings) {
+            // Check for conflicts in the target listing
+            const conflicts = await checkReservationConflicts(otherListing.id, startDate, endDate);
+            const blocked = await checkBlockedDateConflicts(otherListing.id, startDate, endDate);
+
+            if (conflicts.length === 0 && blocked.length === 0) {
+              await db.insert('available_slots', {
+                listing_id: otherListing.id,
+                start_datetime: startDate,
+                end_datetime: endDate,
+                slot_type: slot_type || 'regular',
+                price_override: price_override || null,
+                booking_type: booking_type || null,
+                slot_duration: slot_duration || null,
+                is_available: true
+              });
+            }
+          }
+        }
+      } catch (syncError) {
+        console.error('Error synchronizing doctor availability:', syncError);
+        // Continue validation response even if sync fails
+      }
+
       res.status(201).json({
         status: 'success',
         message: 'Available slot added successfully',
