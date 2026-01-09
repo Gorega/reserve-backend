@@ -211,6 +211,24 @@ class EmailService {
    */
   initializeTransporter() {
     try {
+      // In development mode, we skip transporter initialization to avoid EAUTH errors
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Email Service: Development mode detected. SMTP transporter initialization skipped. Emails will be logged to console.');
+        this.transporter = {
+          sendMail: async (options) => {
+            console.log('--- DEVELOPMENT EMAIL LOG ---');
+            console.log(`To: ${options.to}`);
+            console.log(`Subject: ${options.subject}`);
+            console.log('--- Text Version ---');
+            console.log(options.text);
+            console.log('--- End of Email ---');
+            return { messageId: 'dev-mode-log-' + Date.now() };
+          },
+          verify: (callback) => callback(null, true)
+        };
+        return;
+      }
+
       this.transporter = nodemailer.createTransport({
         service: process.env.EMAIL_SERVICE || 'gmail',
         host: process.env.EMAIL_HOST || 'smtp.gmail.com',
@@ -266,7 +284,7 @@ class EmailService {
     const isRTL = language === 'ar' || language === 'he';
     const dir = isRTL ? 'rtl' : 'ltr';
     const textAlign = isRTL ? 'right' : 'left';
-    
+
     return `
     <!DOCTYPE html>
     <html lang="${language}" dir="${dir}">
@@ -454,7 +472,7 @@ class EmailService {
     const dir = isRTL ? 'rtl' : 'ltr';
     const textAlign = isRTL ? 'right' : 'left';
     const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-    
+
     return `
     <!DOCTYPE html>
     <html lang="${language}" dir="${dir}">
@@ -603,7 +621,7 @@ class EmailService {
   createPasswordResetEmailTemplate(userName, resetUrl, language = 'ar') {
     const translations = this.translations[language] || this.translations['ar'];
     const isRTL = language === 'ar' || language === 'he';
-    
+
     return `
     <!DOCTYPE html>
     <html lang="${language}" dir="${isRTL ? 'rtl' : 'ltr'}">
@@ -712,7 +730,7 @@ class EmailService {
     const isRTL = language === 'ar' || language === 'he';
     const dir = isRTL ? 'rtl' : 'ltr';
     const textAlign = isRTL ? 'right' : 'left';
-    
+
     return `
     <!DOCTYPE html>
     <html lang="${language}" dir="${dir}">
@@ -913,7 +931,7 @@ class EmailService {
 
       const resetUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/auth/reset-password?token=${resetToken}`;
       const translations = this.translations[language] || this.translations['ar'];
-      
+
       const htmlContent = this.createPasswordResetEmailTemplate(userName, resetUrl, language);
 
       const mailOptions = {

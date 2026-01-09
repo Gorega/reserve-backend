@@ -23,7 +23,7 @@ const listingController = {
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 10;
       const filters = {};
-      
+
       // Add filters if provided
       if (req.query.title) filters.title = req.query.title;
       if (req.query.category_id) filters.category_id = parseInt(req.query.category_id);
@@ -32,10 +32,10 @@ const listingController = {
       if (req.query.min_price) filters.min_price = parseFloat(req.query.min_price);
       if (req.query.max_price) filters.max_price = parseFloat(req.query.max_price);
       if (req.query.location) filters.location = req.query.location;
-      
+
       // Add combined search filter (searches in both title and location)
       if (req.query.search) filters.search = req.query.search;
-      
+
       // Handle date filters
       if (req.query.start_date) {
         filters.start_date = req.query.start_date;
@@ -43,7 +43,7 @@ const listingController = {
       if (req.query.end_date) {
         filters.end_date = req.query.end_date;
       }
-      
+
       // Handle boolean filters
       if (req.query.is_hourly !== undefined) {
         filters.is_hourly = req.query.is_hourly === 'true';
@@ -57,21 +57,24 @@ const listingController = {
       if (req.query.instant_booking !== undefined) {
         filters.instant_booking = req.query.instant_booking === 'true';
       }
-      
+      if (req.query.is_doctor_listing !== undefined) {
+        filters.is_doctor_listing = req.query.is_doctor_listing === 'true';
+      }
+
       // Property-specific filters
       if (req.query.max_guests) filters.max_guests = parseInt(req.query.max_guests);
       if (req.query.bedrooms) filters.bedrooms = parseInt(req.query.bedrooms);
       if (req.query.beds) filters.beds = parseInt(req.query.beds);
       if (req.query.bathrooms) filters.bathrooms = parseFloat(req.query.bathrooms);
       if (req.query.room_type) filters.room_type = req.query.room_type;
-      
+
       // Location-based search
       if (req.query.latitude && req.query.longitude && req.query.radius) {
         filters.latitude = parseFloat(req.query.latitude);
         filters.longitude = parseFloat(req.query.longitude);
         filters.radius = parseFloat(req.query.radius);
       }
-      
+
       // Handle amenities filter (can be single value or array)
       if (req.query.amenities) {
         if (Array.isArray(req.query.amenities)) {
@@ -80,12 +83,12 @@ const listingController = {
           filters.amenities = [parseInt(req.query.amenities)];
         }
       }
-      
+
       // Sort options
       if (req.query.sort_by) {
         filters.sort_by = req.query.sort_by;
       }
-            
+
       // Get listings
       const listings = await listingModel.getAll(filters, page, limit);
 
@@ -125,11 +128,11 @@ const listingController = {
           if (l.amenities === undefined) l.amenities = amenitiesMap[l.id] || [];
         }
       }
-      
+
       // Count total listings for pagination
       const countQuery = await listingModel.getAll(filters, 1, Number.MAX_SAFE_INTEGER);
       const totalCount = countQuery.length;
-      
+
       res.status(200).json({
         status: 'success',
         results: listings.length,
@@ -142,7 +145,7 @@ const listingController = {
       next(error);
     }
   },
-  
+
   /**
    * Get listing by ID
    * @param {Object} req - Express request object
@@ -153,7 +156,7 @@ const listingController = {
     try {
       const { id } = req.params;
       const listing = await listingModel.getById(id);
-      
+
       res.status(200).json({
         status: 'success',
         data: listing
@@ -162,7 +165,7 @@ const listingController = {
       next(error);
     }
   },
-  
+
   /**
    * Get effective price for a listing on a specific date
    * @param {Object} req - Express request object
@@ -173,17 +176,17 @@ const listingController = {
     try {
       const { id } = req.params;
       const { date, pricing_option_id } = req.query;
-      
+
       if (!date) {
         return res.status(400).json({
           status: 'error',
           message: 'Date parameter is required'
         });
       }
-      
+
       const specialPricingModel = require('../models/specialPricingModel');
       const effectivePrice = await specialPricingModel.getEffectivePrice(id, date, pricing_option_id);
-      
+
       res.status(200).json({
         status: 'success',
         data: effectivePrice
@@ -192,7 +195,7 @@ const listingController = {
       next(error);
     }
   },
-  
+
   /**
    * Get all main categories (parent_id is NULL)
    * @param {Object} req - Express request object
@@ -202,7 +205,7 @@ const listingController = {
   async getMainCategories(req, res, next) {
     try {
       const categories = await listingModel.getMainCategories();
-      
+
       res.status(200).json({
         status: 'success',
         results: categories.length,
@@ -212,7 +215,7 @@ const listingController = {
       next(error);
     }
   },
-  
+
   /**
    * Get subcategories by parent ID
    * @param {Object} req - Express request object
@@ -222,13 +225,13 @@ const listingController = {
   async getSubcategories(req, res, next) {
     try {
       const { parentId } = req.params;
-      
+
       if (!parentId) {
         return next(badRequest('Parent ID is required'));
       }
-      
+
       const subcategories = await listingModel.getSubcategories(parentId);
-      
+
       res.status(200).json({
         status: 'success',
         results: subcategories.length,
@@ -238,7 +241,7 @@ const listingController = {
       next(error);
     }
   },
-  
+
   /**
    * Create a new listing
    * @param {Object} req - Express request object
@@ -248,15 +251,15 @@ const listingController = {
   async create(req, res, next) {
     try {
       const listingData = req.body;
-      
+
       // Set user ID from authenticated user
       listingData.user_id = req.user.id;
-      
+
       // Validate required fields
       if (!listingData.listing_type) {
         return next(badRequest('Listing type is required'));
       }
-      
+
       // Process pricing options if provided
       if (listingData.pricing_options) {
         if (!Array.isArray(listingData.pricing_options)) {
@@ -266,20 +269,20 @@ const listingController = {
             return next(badRequest('Invalid pricing options format'));
           }
         }
-        
+
         // Validate pricing options
         if (!Array.isArray(listingData.pricing_options) || listingData.pricing_options.length === 0) {
           return next(badRequest('At least one pricing option is required'));
         }
-        
+
         // Clean up pricing options to ensure proper format
         listingData.pricing_options = listingData.pricing_options.map(option => {
           // Remove any client-side string IDs that might cause database issues
-          const cleanOption = {...option};
+          const cleanOption = { ...option };
           if (cleanOption.id && typeof cleanOption.id === 'string') {
             delete cleanOption.id;
           }
-          
+
           return {
             ...cleanOption,
             price: parseFloat(cleanOption.price),
@@ -289,29 +292,29 @@ const listingController = {
             minimum_units: parseInt(cleanOption.minimum_units) || 1
           };
         });
-        
+
         // Ensure at least one option is marked as default
         if (!listingData.pricing_options.some(option => option.is_default)) {
           listingData.pricing_options[0].is_default = true;
         }
-        
+
         // Set legacy fields for backward compatibility
         const hourOption = listingData.pricing_options.find(p => p.unit_type === 'hour');
         const dayOption = listingData.pricing_options.find(p => p.unit_type === 'day');
         const nightOption = listingData.pricing_options.find(p => p.unit_type === 'night');
         const appointmentOption = listingData.pricing_options.find(p => p.unit_type === 'appointment');
-        
+
         if (hourOption) listingData.price_per_hour = parseFloat(hourOption.price);
         if (dayOption) listingData.price_per_day = parseFloat(dayOption.price);
         if (nightOption) listingData.price_per_half_night = parseFloat(nightOption.price);
-        
+
         // Set default unit_type if not provided
         if (!listingData.unit_type) {
           const defaultOption = listingData.pricing_options.find(p => p.is_default);
-          listingData.unit_type = defaultOption ? defaultOption.unit_type : 
+          listingData.unit_type = defaultOption ? defaultOption.unit_type :
             listingData.pricing_options[0].unit_type;
         }
-        
+
         // Set booking_type based on unit_type
         if (listingData.unit_type === 'hour') {
           listingData.booking_type = 'hourly';
@@ -322,11 +325,11 @@ const listingController = {
         } else if (listingData.unit_type === 'appointment') {
           listingData.booking_type = 'appointment';
         }
-      } 
+      }
       // Create pricing options from legacy fields if not provided
       else if (listingData.price_per_hour || listingData.price_per_day || listingData.price_per_half_night) {
         listingData.pricing_options = [];
-        
+
         if (listingData.price_per_hour) {
           listingData.pricing_options.push({
             price: parseFloat(listingData.price_per_hour),
@@ -335,7 +338,7 @@ const listingController = {
             is_default: listingData.unit_type === 'hour' || !listingData.unit_type
           });
         }
-        
+
         if (listingData.price_per_day) {
           listingData.pricing_options.push({
             price: parseFloat(listingData.price_per_day),
@@ -344,7 +347,7 @@ const listingController = {
             is_default: listingData.unit_type === 'day'
           });
         }
-        
+
         if (listingData.price_per_half_night) {
           listingData.pricing_options.push({
             price: parseFloat(listingData.price_per_half_night),
@@ -353,12 +356,12 @@ const listingController = {
             is_default: listingData.unit_type === 'night'
           });
         }
-        
+
         // Set default unit_type if not provided
         if (!listingData.unit_type && listingData.pricing_options.length > 0) {
           listingData.unit_type = listingData.pricing_options[0].unit_type;
         }
-        
+
         // Set booking_type based on unit_type
         if (listingData.unit_type === 'hour') {
           listingData.booking_type = 'hourly';
@@ -386,11 +389,11 @@ const listingController = {
       } else {
         return next(badRequest('At least one pricing option is required'));
       }
-      
+
       if (!listingData.category_id) {
         return next(badRequest('Category is required'));
       }
-      
+
       // Validate cancellation policy
       if (listingData.cancellation_policy) {
         const validPolicies = ['flexible', 'moderate', 'strict', 'non_refundable'];
@@ -401,7 +404,7 @@ const listingController = {
         // Set default cancellation policy if not provided
         listingData.cancellation_policy = 'moderate';
       }
-      
+
       // Handle slot_duration - ensure it's properly parsed as an integer
       if (listingData.slot_duration) {
         listingData.slot_duration = parseInt(listingData.slot_duration);
@@ -416,11 +419,11 @@ const listingController = {
           listingData.slot_duration = 60;
         }
       }
-      
+
       // Handle photos if files are uploaded
       if (req.files && req.files.length > 0) {
         const uploadedPhotos = [];
-        
+
         for (const file of req.files) {
           try {
             // Upload to Cloudinary
@@ -437,32 +440,32 @@ const listingController = {
             }
           }
         }
-        
+
         listingData.photos = uploadedPhotos;
       }
-      
+
       // Create listing
       const listing = await listingModel.create(listingData);
-      
+
       // Handle special pricing if provided
       if (listingData.special_pricing && Array.isArray(listingData.special_pricing) && listingData.special_pricing.length > 0) {
         try {
           for (const specialPricingItem of listingData.special_pricing) {
             // Set listing ID for the special pricing
             specialPricingItem.listing_id = listing.id;
-            
+
             // Find the corresponding pricing option ID from the created listing
             if (specialPricingItem.pricing_option_id && typeof specialPricingItem.pricing_option_id === 'string') {
               // If it's a client-side ID, find the actual pricing option
               const pricingOptions = await pricingOptionModel.getByListingId(listing.id);
-              const matchingOption = pricingOptions.find(option => 
+              const matchingOption = pricingOptions.find(option =>
                 option.unit_type === (listingData.pricing_options.find(p => p.id === specialPricingItem.pricing_option_id)?.unit_type)
               );
               if (matchingOption) {
                 specialPricingItem.pricing_option_id = matchingOption.id;
               }
             }
-            
+
             // Convert pricing_option to valid ENUM value
             let pricingOption = 'per_hour'; // default
             if (specialPricingItem.pricing_option_id) {
@@ -487,32 +490,32 @@ const listingController = {
             }
 
             // Create the special pricing entry with correct column mapping
-             const specialPricingData = {
-               listing_id: specialPricingItem.listing_id,
-               price: specialPricingItem.special_price || specialPricingItem.price,
-               pricing_option: pricingOption,
-               date: specialPricingItem.specific_date || specialPricingItem.date || null,
-               day_of_week: specialPricingItem.day_of_week || null,
-               is_recurring: specialPricingItem.is_recurring || false,
-               start_date: specialPricingItem.recurring_start_date || specialPricingItem.start_date || null,
-               end_date: specialPricingItem.recurring_end_date || specialPricingItem.end_date || null,
-               reason: specialPricingItem.reason || ''
-             };
-             await specialPricingModel.create(specialPricingData);
+            const specialPricingData = {
+              listing_id: specialPricingItem.listing_id,
+              price: specialPricingItem.special_price || specialPricingItem.price,
+              pricing_option: pricingOption,
+              date: specialPricingItem.specific_date || specialPricingItem.date || null,
+              day_of_week: specialPricingItem.day_of_week || null,
+              is_recurring: specialPricingItem.is_recurring || false,
+              start_date: specialPricingItem.recurring_start_date || specialPricingItem.start_date || null,
+              end_date: specialPricingItem.recurring_end_date || specialPricingItem.end_date || null,
+              reason: specialPricingItem.reason || ''
+            };
+            await specialPricingModel.create(specialPricingData);
           }
         } catch (specialPricingError) {
           console.error('Error creating special pricing:', specialPricingError);
           // Don't fail the entire request if special pricing fails
         }
       }
-      
+
       res.status(201).json({
         status: 'success',
         data: listing
       });
     } catch (error) {
       console.error('Error creating listing:', error);
-      
+
       // Clean up uploaded files if there was an error
       if (req.files && req.files.length > 0) {
         req.files.forEach(file => {
@@ -521,7 +524,7 @@ const listingController = {
           }
         });
       }
-      
+
       // Handle specific errors
       if (error.code === 'ER_NO_SUCH_TABLE') {
         return next(serverError('Database table not found'));
@@ -530,11 +533,11 @@ const listingController = {
       } else if (error.message && error.message.includes('cancellation_policy')) {
         return next(badRequest('Invalid cancellation policy'));
       }
-      
+
       next(error);
     }
   },
-  
+
   /**
    * Update a listing
    * @param {Object} req - Express request object
@@ -545,7 +548,7 @@ const listingController = {
     try {
       const { id } = req.params;
       let listingData = req.body;
-      
+
       // Handle pricing_options if it's a string (from JSON.stringify)
       if (listingData.pricing_options && typeof listingData.pricing_options === 'string') {
         try {
@@ -554,13 +557,13 @@ const listingController = {
           console.error('Error parsing pricing_options:', e);
         }
       }
-      
+
       // Check if user owns the listing
       const listing = await listingModel.getById(id);
       if (listing.user_id !== req.user.id && !req.user.is_admin) {
         return next(badRequest('You do not own this listing'));
       }
-      
+
       // Process pricing options if provided
       if (listingData.pricing_options) {
         if (!Array.isArray(listingData.pricing_options)) {
@@ -570,20 +573,20 @@ const listingController = {
             return next(badRequest('Invalid pricing options format'));
           }
         }
-        
+
         // Validate pricing options
         if (!Array.isArray(listingData.pricing_options) || listingData.pricing_options.length === 0) {
           return next(badRequest('At least one pricing option is required'));
         }
-        
+
         // Clean up pricing options to ensure proper format
         listingData.pricing_options = listingData.pricing_options.map(option => {
           // Remove any client-side string IDs that might cause database issues
-          const cleanOption = {...option};
+          const cleanOption = { ...option };
           if (cleanOption.id && typeof cleanOption.id === 'string') {
             delete cleanOption.id;
           }
-          
+
           return {
             ...cleanOption,
             price: parseFloat(cleanOption.price),
@@ -593,29 +596,29 @@ const listingController = {
             minimum_units: parseInt(cleanOption.minimum_units) || 1
           };
         });
-        
+
         // Ensure at least one option is marked as default
         if (!listingData.pricing_options.some(option => option.is_default)) {
           listingData.pricing_options[0].is_default = true;
         }
-        
+
         // Set legacy fields for backward compatibility
         const hourOption = listingData.pricing_options.find(p => p.unit_type === 'hour');
         const dayOption = listingData.pricing_options.find(p => p.unit_type === 'day');
         const nightOption = listingData.pricing_options.find(p => p.unit_type === 'night');
         const appointmentOption = listingData.pricing_options.find(p => p.unit_type === 'appointment');
-        
+
         if (hourOption) listingData.price_per_hour = parseFloat(hourOption.price);
         if (dayOption) listingData.price_per_day = parseFloat(dayOption.price);
         if (nightOption) listingData.price_per_half_night = parseFloat(nightOption.price);
-        
+
         // Set default unit_type if not provided
         if (!listingData.unit_type) {
           const defaultOption = listingData.pricing_options.find(p => p.is_default);
-          listingData.unit_type = defaultOption ? defaultOption.unit_type : 
+          listingData.unit_type = defaultOption ? defaultOption.unit_type :
             listingData.pricing_options[0].unit_type;
         }
-        
+
         // Set booking_type based on unit_type
         if (listingData.unit_type === 'hour') {
           listingData.booking_type = 'hourly';
@@ -626,7 +629,7 @@ const listingController = {
         } else if (listingData.unit_type === 'appointment') {
           listingData.booking_type = 'appointment';
         }
-        
+
         // Handle slot_duration - ensure it's properly parsed as an integer
         if (listingData.slot_duration) {
           listingData.slot_duration = parseInt(listingData.slot_duration);
@@ -651,11 +654,11 @@ const listingController = {
             listingData.slot_duration = 30;
           }
         }
-      } 
+      }
       // Create pricing options from legacy fields if provided but no pricing_options
       else if (listingData.price_per_hour || listingData.price_per_day || listingData.price_per_half_night) {
         listingData.pricing_options = [];
-        
+
         if (listingData.price_per_hour) {
           listingData.pricing_options.push({
             price: parseFloat(listingData.price_per_hour),
@@ -664,7 +667,7 @@ const listingController = {
             is_default: listingData.unit_type === 'hour' || !listingData.unit_type
           });
         }
-        
+
         if (listingData.price_per_day) {
           listingData.pricing_options.push({
             price: parseFloat(listingData.price_per_day),
@@ -673,7 +676,7 @@ const listingController = {
             is_default: listingData.unit_type === 'day'
           });
         }
-        
+
         if (listingData.price_per_half_night) {
           listingData.pricing_options.push({
             price: parseFloat(listingData.price_per_half_night),
@@ -682,12 +685,12 @@ const listingController = {
             is_default: listingData.unit_type === 'night'
           });
         }
-        
+
         // Set default unit_type if not provided
         if (!listingData.unit_type && listingData.pricing_options.length > 0) {
           listingData.unit_type = listingData.pricing_options[0].unit_type;
         }
-        
+
         // Set booking_type based on unit_type
         if (listingData.unit_type === 'hour') {
           listingData.booking_type = 'hourly';
@@ -713,15 +716,15 @@ const listingController = {
           }
         }
       }
-      
+
       // Start a transaction
       const connection = await db.getPool().getConnection();
       await connection.beginTransaction();
-      
+
       try {
         // Handle photo deletions first
         if (listingData.photos_to_delete && listingData.photos_to_delete.length > 0) {
-          
+
           // Get photo URLs before deleting
           const photosToDelete = await connection.query(
             'SELECT image_url FROM listing_photos WHERE id IN (?)',
@@ -733,12 +736,12 @@ const listingController = {
             try {
               // Check if image_url exists and is a valid string
               if (photo && photo.image_url && typeof photo.image_url === 'string') {
-              // Extract public_id from Cloudinary URL
+                // Extract public_id from Cloudinary URL
                 const urlParts = photo.image_url.split('/');
                 if (urlParts.length > 0) {
                   const fileNameWithExt = urlParts[urlParts.length - 1];
                   const publicId = fileNameWithExt.split('.')[0];
-              await deleteFile(publicId);
+                  await deleteFile(publicId);
                 }
               }
             } catch (error) {
@@ -766,7 +769,7 @@ const listingController = {
         // Handle new photos if files are uploaded
         if (req.files && req.files.length > 0) {
           const uploadedPhotos = [];
-          
+
           for (const file of req.files) {
             try {
               // Upload to Cloudinary
@@ -783,7 +786,7 @@ const listingController = {
               }
             }
           }
-          
+
           // Insert new photos
           for (const photo of uploadedPhotos) {
             await connection.query(
@@ -792,10 +795,10 @@ const listingController = {
             );
           }
         }
-        
+
         // Handle the update directly here instead of calling listingModel.update
         // This avoids nested transactions which can cause lock timeouts
-        
+
         // Create a clean object with only valid listing table fields
         const validListingFields = [
           'user_id', 'category_id', 'listing_type', 'title', 'description',
@@ -803,7 +806,7 @@ const listingController = {
           'is_hourly', 'location', 'latitude', 'longitude', 'instant_booking',
           'cancellation_policy', 'active'
         ];
-        
+
         // Extract only the fields that belong in the listings table
         const mainListingData = {};
         for (const field of validListingFields) {
@@ -811,9 +814,9 @@ const listingController = {
             mainListingData[field] = listingData[field];
           }
         }
-        
+
         // These fields are already excluded by using the validListingFields approach
-        
+
         // Update main listing data
         if (Object.keys(mainListingData).length > 0) {
           await connection.query(
@@ -821,16 +824,16 @@ const listingController = {
             [mainListingData, id]
           );
         }
-        
+
         // Update pricing options if provided
         if (listingData.pricing_options && Array.isArray(listingData.pricing_options)) {
           await pricingOptionModel.createMultiple(id, listingData.pricing_options, connection);
         }
-        
+
         // Handle property details if this is a property listing
         if (listingData.listing_type === 'property') {
           const propertyDetails = listingData.property_details ? { ...listingData.property_details } : {};
-          
+
           // Add individual property fields that might be at the root level
           if (listingData.property_type) propertyDetails.property_type = listingData.property_type;
           if (listingData.max_guests) propertyDetails.max_guests = Math.round(parseFloat(listingData.max_guests));
@@ -840,13 +843,13 @@ const listingController = {
           if (listingData.room_type) propertyDetails.room_type = listingData.room_type;
           if (listingData.min_nights) propertyDetails.min_nights = Math.round(parseFloat(listingData.min_nights));
           if (listingData.max_nights) propertyDetails.max_nights = Math.round(parseFloat(listingData.max_nights));
-          
+
           // Check if property details exist
           const [existingPropertyDetails] = await connection.query(
             'SELECT listing_id FROM listing_property_details WHERE listing_id = ?',
             [id]
           );
-          
+
           if (Object.keys(propertyDetails).length > 0) {
             if (existingPropertyDetails.length > 0) {
               // Update existing property details
@@ -863,12 +866,12 @@ const listingController = {
             }
           }
         }
-        
+
         // Handle amenities if provided
         if (listingData.amenities && Array.isArray(listingData.amenities)) {
           // Delete existing amenities
           await connection.query('DELETE FROM listing_amenities WHERE listing_id = ?', [id]);
-          
+
           // Insert new amenities
           if (listingData.amenities.length > 0) {
             for (const amenityId of listingData.amenities) {
@@ -879,12 +882,12 @@ const listingController = {
             }
           }
         }
-        
+
         // Handle house rules if provided
         if (listingData.house_rules && Array.isArray(listingData.house_rules)) {
           // Delete existing house rules
           await connection.query('DELETE FROM listing_house_rules WHERE listing_id = ?', [id]);
-          
+
           // Insert new house rules
           if (listingData.house_rules.length > 0) {
             for (const rule of listingData.house_rules) {
@@ -899,12 +902,12 @@ const listingController = {
             }
           }
         }
-        
+
         // Handle safety features if provided
         if (listingData.safety_features && Array.isArray(listingData.safety_features)) {
           // Delete existing safety features
           await connection.query('DELETE FROM listing_safety_features WHERE listing_id = ?', [id]);
-          
+
           // Insert new safety features
           if (listingData.safety_features.length > 0) {
             for (const featureId of listingData.safety_features) {
@@ -915,11 +918,11 @@ const listingController = {
             }
           }
         }
-        
+
         // Handle vehicle details if this is a vehicle listing
         if (listingData.listing_type === 'vehicle') {
           const carDetails = listingData.car_details ? { ...listingData.car_details } : {};
-          
+
           // Add individual car fields that might be at the root level
           if (listingData.brand) carDetails.brand = listingData.brand;
           if (listingData.model) carDetails.model = listingData.model;
@@ -928,13 +931,13 @@ const listingController = {
           if (listingData.seats) carDetails.seats = parseInt(listingData.seats);
           if (listingData.fuel_type) carDetails.fuel_type = listingData.fuel_type;
           if (listingData.mileage) carDetails.mileage = parseInt(listingData.mileage);
-          
+
           // Check if car details exist
           const [existingCarDetails] = await connection.query(
             'SELECT listing_id FROM listing_car_details WHERE listing_id = ?',
             [id]
           );
-          
+
           if (Object.keys(carDetails).length > 0) {
             if (existingCarDetails.length > 0) {
               // Update existing car details
@@ -951,11 +954,11 @@ const listingController = {
             }
           }
         }
-        
+
         // Handle service details if this is a service listing
         if (listingData.listing_type === 'service') {
           const serviceDetails = listingData.service_details ? { ...listingData.service_details } : {};
-          
+
           // Add individual service fields that might be at the root level
           if (listingData.service_type) serviceDetails.service_type = listingData.service_type;
           if (listingData.service_duration) serviceDetails.service_duration = parseInt(listingData.service_duration);
@@ -965,13 +968,13 @@ const listingController = {
           if (listingData.remote_service !== undefined) serviceDetails.remote_service = listingData.remote_service;
           if (listingData.experience_years) serviceDetails.experience_years = parseInt(listingData.experience_years);
           if (listingData.appointment_required !== undefined) serviceDetails.appointment_required = listingData.appointment_required;
-          
+
           // Check if service details exist
           const [existingServiceDetails] = await connection.query(
             'SELECT listing_id FROM service_details WHERE listing_id = ?',
             [id]
           );
-          
+
           if (Object.keys(serviceDetails).length > 0) {
             if (existingServiceDetails.length > 0) {
               // Update existing service details
@@ -988,11 +991,11 @@ const listingController = {
             }
           }
         }
-        
+
         // Handle subscription details if this is a subscription listing
         if (listingData.listing_type === 'subscription') {
           const subscriptionDetails = listingData.subscription_details ? { ...listingData.subscription_details } : {};
-          
+
           // Add individual subscription fields that might be at the root level
           if (listingData.subscription_type) subscriptionDetails.subscription_type = listingData.subscription_type;
           if (listingData.duration_days) subscriptionDetails.duration_days = parseInt(listingData.duration_days);
@@ -1000,13 +1003,13 @@ const listingController = {
           if (listingData.includes_trainer !== undefined) subscriptionDetails.includes_trainer = listingData.includes_trainer;
           if (listingData.includes_classes !== undefined) subscriptionDetails.includes_classes = listingData.includes_classes;
           if (listingData.max_visits_per_week) subscriptionDetails.max_visits_per_week = parseInt(listingData.max_visits_per_week);
-          
+
           // Check if subscription details exist
           const [existingSubscriptionDetails] = await connection.query(
             'SELECT listing_id FROM listing_subscription_details WHERE listing_id = ?',
             [id]
           );
-          
+
           if (Object.keys(subscriptionDetails).length > 0) {
             if (existingSubscriptionDetails.length > 0) {
               // Update existing subscription details
@@ -1023,11 +1026,11 @@ const listingController = {
             }
           }
         }
-        
+
         // Handle venue details if this is a venue listing
         if (listingData.listing_type === 'venue') {
           const venueDetails = listingData.venue_details ? { ...listingData.venue_details } : {};
-          
+
           // Add individual venue fields that might be at the root level
           if (listingData.venue_type) venueDetails.venue_type = listingData.venue_type;
           if (listingData.max_capacity) venueDetails.max_capacity = parseInt(listingData.max_capacity);
@@ -1037,13 +1040,13 @@ const listingController = {
           if (listingData.has_parking !== undefined) venueDetails.has_parking = listingData.has_parking;
           if (listingData.has_sound_system !== undefined) venueDetails.has_sound_system = listingData.has_sound_system;
           if (listingData.has_stage !== undefined) venueDetails.has_stage = listingData.has_stage;
-          
+
           // Check if venue details exist
           const [existingVenueDetails] = await connection.query(
             'SELECT listing_id FROM listing_venue_details WHERE listing_id = ?',
             [id]
           );
-          
+
           if (Object.keys(venueDetails).length > 0) {
             if (existingVenueDetails.length > 0) {
               // Update existing venue details
@@ -1060,7 +1063,7 @@ const listingController = {
             }
           }
         }
-        
+
         // Handle special pricing if provided
         if (listingData.special_pricing && Array.isArray(listingData.special_pricing)) {
           try {
@@ -1069,13 +1072,13 @@ const listingController = {
               'DELETE FROM special_pricing WHERE listing_id = ?',
               [id]
             );
-            
+
             // Then create new special pricing entries
             if (listingData.special_pricing.length > 0) {
               for (const specialPricingItem of listingData.special_pricing) {
                 // Set listing ID for the special pricing
                 specialPricingItem.listing_id = id;
-                
+
                 // Find the corresponding pricing option ID from the updated listing
                 if (specialPricingItem.pricing_option_id && typeof specialPricingItem.pricing_option_id === 'string') {
                   // If it's a client-side ID, find the actual pricing option
@@ -1083,14 +1086,14 @@ const listingController = {
                     'SELECT * FROM pricing_options WHERE listing_id = ?',
                     [id]
                   );
-                  const matchingOption = pricingOptionRows.find(option => 
+                  const matchingOption = pricingOptionRows.find(option =>
                     option.unit_type === (listingData.pricing_options?.find(p => p.id === specialPricingItem.pricing_option_id)?.unit_type)
                   );
                   if (matchingOption) {
                     specialPricingItem.pricing_option_id = matchingOption.id;
                   }
                 }
-                
+
                 // Convert pricing_option to valid ENUM value
                 let pricingOption = 'per_hour'; // default
                 if (specialPricingItem.pricing_option_id) {
@@ -1134,17 +1137,17 @@ const listingController = {
             // Don't fail the entire request if special pricing fails
           }
         }
-        
+
         // Get the updated listing
         const [updatedListingRows] = await connection.query(
           'SELECT * FROM listings WHERE id = ?',
           [id]
         );
         const updatedListing = updatedListingRows[0];
-        
+
         // Commit transaction
         await connection.commit();
-        
+
         res.status(200).json({
           status: 'success',
           data: updatedListing
@@ -1168,7 +1171,7 @@ const listingController = {
       next(error);
     }
   },
-  
+
   /**
    * Delete a listing
    * @param {Object} req - Express request object
@@ -1178,13 +1181,13 @@ const listingController = {
   async delete(req, res, next) {
     try {
       const { id } = req.params;
-      
+
       // Check if user owns the listing
       const listing = await listingModel.getById(id);
       if (listing.user_id !== req.user.id && !req.user.is_admin) {
         return next(badRequest('You do not own this listing'));
       }
-      
+
       // Delete listing photos
       if (listing.photos && listing.photos.length > 0) {
         listing.photos.forEach(photo => {
@@ -1192,15 +1195,15 @@ const listingController = {
           deleteFile(filename);
         });
       }
-      
+
       await listingModel.delete(id);
-      
+
       res.status(204).end();
     } catch (error) {
       next(error);
     }
   },
-  
+
   /**
    * Add photos to a listing
    * @param {Object} req - Express request object
@@ -1210,31 +1213,31 @@ const listingController = {
   async addPhotos(req, res, next) {
     try {
       const { id } = req.params;
-            
+
       // Check if user owns the listing
       const listing = await listingModel.getById(id);
       if (!listing) {
         return next(notFound('Listing not found'));
       }
-      
+
       if (listing.user_id !== req.user.id && !req.user.is_admin) {
         return next(badRequest('You do not own this listing'));
       }
-      
+
       // Check if files are uploaded
       if (!req.files || req.files.length === 0) {
         return next(badRequest('No photos uploaded'));
       }
-            
+
       const addedPhotos = [];
-      
+
       // Add each photo
       for (const file of req.files) {
-        
+
         try {
           // Upload to Cloudinary
           const cloudinaryResult = await uploadToCloudinary(file.path);
-          
+
           // Add to database with Cloudinary URL
           const photo = await listingModel.addPhoto(id, cloudinaryResult.secure_url);
           addedPhotos.push(photo);
@@ -1246,12 +1249,12 @@ const listingController = {
           }
         }
       }
-      
+
       if (addedPhotos.length === 0) {
         return next(serverError('Failed to add any photos'));
       }
-      
-      
+
+
       res.status(201).json({
         status: 'success',
         results: addedPhotos.length,
@@ -1259,7 +1262,7 @@ const listingController = {
       });
     } catch (error) {
       console.error('Error adding photos:', error);
-      
+
       // Delete uploaded files if there was an error
       if (req.files && req.files.length > 0) {
         req.files.forEach(file => {
@@ -1271,7 +1274,7 @@ const listingController = {
       next(error);
     }
   },
-  
+
   /**
    * Delete a photo from a listing
    * @param {Object} req - Express request object
@@ -1281,39 +1284,39 @@ const listingController = {
   async deletePhoto(req, res, next) {
     try {
       const { id, photoId } = req.params;
-            
+
       // Check if user owns the listing
       const listing = await listingModel.getById(id);
       if (!listing) {
         return next(notFound('Listing not found'));
       }
-      
+
       if (listing.user_id !== req.user.id && !req.user.is_admin) {
         return next(badRequest('You do not own this listing'));
       }
-      
+
       // Find the photo
       const photos = await listingModel.getListingPhotos(id);
       const photo = photos.find(p => p.id === parseInt(photoId));
-      
+
       if (!photo) {
         return next(notFound('Photo not found'));
       }
-      
+
       // Delete the photo file
       const filename = photo.image_url.split('/').pop();
       deleteFile(filename);
-      
+
       // Delete from database
       await listingModel.deletePhoto(photoId);
-      
+
       res.status(204).end();
     } catch (error) {
       console.error('Error deleting photo:', error);
       next(error);
     }
   },
-  
+
   /**
    * Set a photo as the cover photo
    * @param {Object} req - Express request object
@@ -1323,28 +1326,28 @@ const listingController = {
   async setCoverPhoto(req, res, next) {
     try {
       const { id, photoId } = req.params;
-            
+
       // Check if user owns the listing
       const listing = await listingModel.getById(id);
       if (!listing) {
         return next(notFound('Listing not found'));
       }
-      
+
       if (listing.user_id !== req.user.id && !req.user.is_admin) {
         return next(badRequest('You do not own this listing'));
       }
-      
+
       // Find the photo
       const photos = await listingModel.getListingPhotos(id);
       const photo = photos.find(p => p.id === parseInt(photoId));
-      
+
       if (!photo) {
         return next(notFound('Photo not found'));
       }
-      
+
       // Set as cover
       await listingModel.setCoverPhoto(photoId);
-      
+
       res.status(200).json({
         status: 'success',
         message: 'Cover photo updated'
@@ -1354,7 +1357,7 @@ const listingController = {
       next(error);
     }
   },
-  
+
   /**
    * Check availability for a listing
    * @param {Object} req - Express request object
@@ -1365,7 +1368,7 @@ const listingController = {
     try {
       const { id } = req.params;
       let start_datetime, end_datetime, booking_period;
-      
+
       // Handle both GET and POST requests
       if (req.method === 'GET') {
         start_datetime = req.query.start_datetime || req.query.start_date;
@@ -1377,23 +1380,23 @@ const listingController = {
         end_datetime = req.body.end_datetime || req.body.end_date;
         booking_period = req.body.booking_period;
       }
-      
+
       // Format dates if they don't include time
       if (start_datetime && !start_datetime.includes('T') && !start_datetime.includes(' ')) {
         start_datetime = `${start_datetime}T00:00:00`;
       }
-      
+
       if (end_datetime && !end_datetime.includes('T') && !end_datetime.includes(' ')) {
         end_datetime = `${end_datetime}T23:59:59`;
       }
-      
+
       if (!start_datetime || !end_datetime) {
         return res.status(400).json({
           status: 'error',
           message: 'Start and end datetime are required'
         });
       }
-      
+
       // CRITICAL FIX: For day/night listings with booking_period, check specific slot availability
       if (booking_period && ['morning', 'day', 'night'].includes(booking_period)) {
         // Get the listing to check its unit_type
@@ -1404,17 +1407,17 @@ const listingController = {
             message: 'Listing not found'
           });
         }
-        
+
         // For day/night listings, check if the specific period is available
         if (listing.unit_type === 'day' || listing.unit_type === 'night') {
           // Get available slots for the date range
           const { getPublicAvailableSlots } = require('./hostController');
           const startDate = new Date(start_datetime).toISOString().split('T')[0];
           const endDate = new Date(end_datetime).toISOString().split('T')[0];
-          
+
           try {
             const availableSlots = await getPublicAvailableSlots(id, startDate, endDate);
-            
+
             // Check if any slot matches the requested booking period
             const hasMatchingSlot = availableSlots.some(slot => {
               // Check if slot covers the requested time period
@@ -1422,10 +1425,10 @@ const listingController = {
               const slotEnd = new Date(slot.end_datetime);
               const requestStart = new Date(start_datetime);
               const requestEnd = new Date(end_datetime);
-              
+
               // Slot must cover the entire requested period
               const coversTimeRange = slotStart <= requestStart && slotEnd >= requestEnd;
-              
+
               // For booking_period matching, check slot_type or unit_type
               let periodMatches = false;
               if (booking_period === 'morning' || booking_period === 'day') {
@@ -1435,10 +1438,10 @@ const listingController = {
                 // Check unit_type for night bookings (slot_type is always 'regular' now)
                 periodMatches = slot.unit_type === 'night';
               }
-              
+
               return coversTimeRange && periodMatches;
             });
-            
+
             return res.status(200).json({
               status: 'success',
               data: {
@@ -1451,9 +1454,9 @@ const listingController = {
           }
         }
       }
-            
+
       const isAvailable = await listingModel.checkAvailability(id, start_datetime, end_datetime, booking_period);
-      
+
       res.status(200).json({
         status: 'success',
         data: {
@@ -1462,7 +1465,7 @@ const listingController = {
       });
     } catch (error) {
       console.error('Error checking availability:', error);
-      
+
       // Handle specific errors with appropriate status codes
       if (error.statusCode === 404) {
         return res.status(404).json({
@@ -1475,11 +1478,11 @@ const listingController = {
           message: error.message || 'Invalid request'
         });
       }
-      
+
       next(error);
     }
   },
-  
+
   /**
    * Add availability to a listing
    * @param {Object} req - Express request object
@@ -1490,19 +1493,19 @@ const listingController = {
     try {
       const { id } = req.params;
       const { availability } = req.body;
-      
+
       // Check if user owns the listing
       const listing = await listingModel.getById(id);
       if (listing.user_id !== req.user.id && !req.user.is_admin) {
         return next(badRequest('You do not own this listing'));
       }
-      
+
       if (!availability || !Array.isArray(availability) || availability.length === 0) {
         return next(badRequest('Availability data is required'));
       }
-      
+
       const addedAvailability = await listingModel.addAvailability(id, availability);
-      
+
       res.status(201).json({
         status: 'success',
         results: addedAvailability.length,
@@ -1523,40 +1526,40 @@ const listingController = {
     try {
       const { id } = req.params;
       const { date } = req.query;
-      
+
       if (!date) {
         return next(badRequest('Date parameter is required'));
       }
-      
+
       // Validate date format
       const targetDate = new Date(date);
       if (isNaN(targetDate.getTime())) {
         return next(badRequest('Invalid date format'));
       }
-      
+
       // Check if listing exists
       const listing = await listingModel.getById(id);
       if (!listing) {
         return next(notFound('Listing not found'));
       }
-      
+
       // Get availability mode for this listing
       const [listingSettings] = await db.query(
         'SELECT availability_mode FROM listing_settings WHERE listing_id = ?',
         [id]
       );
-      
+
       const availabilityMode = listingSettings?.availability_mode || 'available-by-default';
-      
+
       // Format date for database query (YYYY-MM-DD)
       const formattedDate = targetDate.toISOString().split('T')[0];
-      
+
       // Get availability data for the specific date
       const availabilityData = await db.query(
         'SELECT * FROM availability WHERE listing_id = ? AND date = ? AND is_available = TRUE ORDER BY start_time ASC',
         [id, formattedDate]
       );
-      
+
       // Get existing bookings for the specific date to filter out booked time slots
       const existingBookings = await db.query(
         `SELECT start_datetime, end_datetime FROM bookings 
@@ -1564,7 +1567,7 @@ const listingController = {
          AND DATE(start_datetime) <= ? AND DATE(end_datetime) >= ?`,
         [id, formattedDate, formattedDate]
       );
-      
+
       // Helper function to check if a time slot overlaps with any booking
       const isTimeSlotBooked = (slotStart, slotEnd) => {
         return existingBookings.some(booking => {
@@ -1572,24 +1575,24 @@ const listingController = {
           const bookingEnd = new Date(booking.end_datetime);
           const slotStartTime = new Date(slotStart);
           const slotEndTime = new Date(slotEnd);
-          
+
           // Check for any overlap between slot and booking
           return slotStartTime < bookingEnd && slotEndTime > bookingStart;
         });
       };
-      
+
       // Format the availability data into time slots and filter out booked ones
       const timeSlots = availabilityData
         .map(slot => {
           const startTime = slot.start_time;
           const endTime = slot.end_time;
-          
+
           // Create full datetime strings
           const startDateTime = `${formattedDate}T${startTime}`;
-          const endDateTime = slot.is_overnight && slot.end_date 
+          const endDateTime = slot.is_overnight && slot.end_date
             ? `${slot.end_date}T${endTime}`
             : `${formattedDate}T${endTime}`;
-          
+
           return {
             id: slot.id,
             start_time: startTime,
@@ -1604,7 +1607,7 @@ const listingController = {
           // Filter out time slots that are already booked
           return !isTimeSlotBooked(slot.start_datetime, slot.end_datetime);
         });
-      
+
       res.status(200).json({
         status: 'success',
         data: {
@@ -1644,20 +1647,20 @@ const listingController = {
 
       // Calculate unified pricing based on duration
       let unifiedPricing = {};
-      
+
       if (listing.pricing_options && listing.pricing_options.length > 0) {
         // Find the appropriate pricing option
         const targetUnitType = unit_type || listing.unit_type;
-        const pricingOption = listing.pricing_options.find(option => 
+        const pricingOption = listing.pricing_options.find(option =>
           option.unit_type === targetUnitType && option.is_default
-        ) || listing.pricing_options.find(option => 
+        ) || listing.pricing_options.find(option =>
           option.unit_type === targetUnitType
         ) || listing.pricing_options.find(option => option.is_default) || listing.pricing_options[0];
 
         // Calculate time difference based on unit type
         let timeDiffMs = endDate - startDate;
         let requestedUnits = 0;
-        
+
         switch (pricingOption.unit_type) {
           case 'hour':
           case 'session':
@@ -1693,7 +1696,7 @@ const listingController = {
         // Calculate unified pricing - price is for the entire duration, not per unit
         const totalPrice = durationBlocks * pricingOption.price;
         const effectiveDuration = durationBlocks * pricingOption.duration;
-        
+
         unifiedPricing = {
           pricingOption: pricingOption,
           unifiedPrice: pricingOption.price, // Price for the entire duration block
@@ -1741,7 +1744,7 @@ const listingController = {
     try {
       const { id } = req.params;
       const { start_date, end_date } = req.query;
-      
+
       // Validate required parameters
       if (!start_date || !end_date) {
         return res.status(400).json({
@@ -1749,26 +1752,26 @@ const listingController = {
           message: 'start_date and end_date are required'
         });
       }
-      
+
       // Check if listing exists and get its details
       const [listing] = await db.query(
         'SELECT * FROM listings WHERE id = ? AND active = 1',
         [id]
       );
-      
+
       if (!listing) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not active'
         });
       }
-      
+
       // Import the getPublicAvailableSlots function from hostController which already handles duration-based splitting
       const { getPublicAvailableSlots } = require('./hostController');
-      
+
       // Get available slots using the enhanced public logic that handles slot duration correctly
       const availableSlots = await getPublicAvailableSlots(id, start_date, end_date);
-      
+
       res.status(200).json({
         status: 'success',
         results: availableSlots.length,
@@ -1790,7 +1793,7 @@ const listingController = {
     try {
       const { id } = req.params;
       const { date } = req.query;
-      
+
       // Validate required parameters
       if (!date) {
         return res.status(400).json({
@@ -1798,7 +1801,7 @@ const listingController = {
           message: 'date parameter is required'
         });
       }
-      
+
       // Validate date format (YYYY-MM-DD)
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
       if (!dateRegex.test(date)) {
@@ -1807,25 +1810,25 @@ const listingController = {
           message: 'Date must be in YYYY-MM-DD format'
         });
       }
-      
+
       // Check if listing exists and is appointment-based
       const [listing] = await db.query(
         'SELECT * FROM listings WHERE id = ? AND active = 1 AND booking_type = ?',
         [id, 'appointment']
       );
-      
+
       if (!listing) {
         return res.status(404).json({
           status: 'error',
           message: 'Appointment-based listing not found or not active'
         });
       }
-      
+
       // Get day of week from date
       const selectedDate = new Date(date + 'T12:00:00');
       const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
       const dayOfWeek = dayNames[selectedDate.getDay()];
-      
+
       // Get appointment slots for this day of week
       const appointmentSlots = await db.query(`
         SELECT 
@@ -1853,7 +1856,7 @@ const listingController = {
         HAVING current_bookings < a.max_bookings
         ORDER BY a.start_time ASC
       `, [date, id, dayOfWeek, date, date]);
-      
+
       // Get host availability for this listing and date
       const hostAvailability = await db.query(`
         SELECT 
@@ -1875,7 +1878,7 @@ const listingController = {
         GROUP BY h.host_id, h.max_concurrent_appointments
         ORDER BY current_queue_count ASC, u.name ASC
       `, [date, id, date]);
-      
+
       // Format the response with available slots and hosts
       const formattedSlots = appointmentSlots.map(slot => ({
         id: slot.id,
@@ -1892,13 +1895,13 @@ const listingController = {
           available_spots: Math.max(0, host.max_concurrent_appointments - host.current_queue_count)
         }))
       }));
-      
+
       res.status(200).json({
         status: 'success',
         results: formattedSlots.length,
         data: formattedSlots
       });
-      
+
     } catch (error) {
       console.error('Error getting appointment slots:', error);
       next(serverError('Failed to get appointment slots'));
@@ -1915,20 +1918,20 @@ const listingController = {
     try {
       const { id } = req.params;
       const { start_date, end_date } = req.query;
-      
+
       // Check if listing exists
       const [listing] = await db.query(
         'SELECT * FROM listings WHERE id = ? AND active = 1',
         [id]
       );
-      
+
       if (!listing) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not active'
         });
       }
-      
+
       // Get date range for filtering
       let startDateTime, endDateTime;
       if (start_date && end_date) {
@@ -1942,10 +1945,10 @@ const listingController = {
         startDateTime = `${today.toISOString().split('T')[0]} 00:00:00`;
         endDateTime = `${futureDate.toISOString().split('T')[0]} 23:59:59`;
       }
-      
+
       // Import toMySQLDateTime helper function from hostController
       const { toMySQLDateTime } = require('./hostController');
-      
+
       // Get confirmed and pending bookings (don't show guest details for privacy)
       const reservations = await db.query(`
         SELECT DISTINCT b.id, b.start_datetime as check_in_date, b.end_datetime as check_out_date, 
@@ -1957,28 +1960,28 @@ const listingController = {
         AND b.end_datetime > ?
         ORDER BY b.start_datetime ASC
       `, [id, endDateTime, startDateTime]);
-      
+
       // Format reservations for frontend (same format as host calendar)
       const formattedReservations = reservations.map(booking => {
         // Convert to consistent MySQL datetime format without timezone issues
         let startDate, endDate;
-        
+
         if (booking.check_in_date instanceof Date) {
           startDate = toMySQLDateTime(booking.check_in_date).replace(' ', 'T');
         } else {
           // Convert MySQL datetime format to ISO format without Z suffix
-          startDate = typeof booking.check_in_date === 'string' ? 
+          startDate = typeof booking.check_in_date === 'string' ?
             booking.check_in_date.replace(' ', 'T').replace('Z', '') : booking.check_in_date;
         }
-        
+
         if (booking.check_out_date instanceof Date) {
           endDate = toMySQLDateTime(booking.check_out_date).replace(' ', 'T');
         } else {
           // Convert MySQL datetime format to ISO format without Z suffix
-          endDate = typeof booking.check_out_date === 'string' ? 
+          endDate = typeof booking.check_out_date === 'string' ?
             booking.check_out_date.replace(' ', 'T').replace('Z', '') : booking.check_out_date;
         }
-        
+
         return {
           id: booking.id,
           type: 'reservation',
@@ -1987,7 +1990,7 @@ const listingController = {
           status: booking.status
         };
       });
-      
+
       res.status(200).json({
         status: 'success',
         results: formattedReservations.length,
@@ -2009,20 +2012,20 @@ const listingController = {
     try {
       const { id } = req.params;
       const { start_date, end_date } = req.query;
-      
+
       // Check if listing exists
       const [listing] = await db.query(
         'SELECT * FROM listings WHERE id = ? AND active = 1',
         [id]
       );
-      
+
       if (!listing) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not active'
         });
       }
-      
+
       // Get date range for filtering
       let startDateTime, endDateTime;
       if (start_date && end_date) {
@@ -2036,10 +2039,10 @@ const listingController = {
         startDateTime = `${today.toISOString().split('T')[0]} 00:00:00`;
         endDateTime = `${futureDate.toISOString().split('T')[0]} 23:59:59`;
       }
-      
+
       // Import toMySQLDateTime helper function from hostController
       const { toMySQLDateTime } = require('./hostController');
-      
+
       // Get blocked dates
       const blockedDates = await db.query(`
         SELECT bd.id, bd.start_datetime, bd.end_datetime, bd.reason, bd.created_at
@@ -2049,28 +2052,28 @@ const listingController = {
         AND bd.end_datetime > ?
         ORDER BY bd.start_datetime ASC
       `, [id, endDateTime, startDateTime]);
-      
+
       // Format blocked dates for frontend (same format as host calendar)
       const formattedBlockedDates = blockedDates.map(blocked => {
         // Convert to consistent MySQL datetime format without timezone issues
         let startDate, endDate;
-        
+
         if (blocked.start_datetime instanceof Date) {
           startDate = toMySQLDateTime(blocked.start_datetime).replace(' ', 'T');
         } else {
           // Convert MySQL datetime format to ISO format without Z suffix
-          startDate = typeof blocked.start_datetime === 'string' ? 
+          startDate = typeof blocked.start_datetime === 'string' ?
             blocked.start_datetime.replace(' ', 'T').replace('Z', '') : blocked.start_datetime;
         }
-        
+
         if (blocked.end_datetime instanceof Date) {
           endDate = toMySQLDateTime(blocked.end_datetime).replace(' ', 'T');
         } else {
           // Convert MySQL datetime format to ISO format without Z suffix
-          endDate = typeof blocked.end_datetime === 'string' ? 
+          endDate = typeof blocked.end_datetime === 'string' ?
             blocked.end_datetime.replace(' ', 'T').replace('Z', '') : blocked.end_datetime;
         }
-        
+
         return {
           id: blocked.id,
           type: 'blocked',
@@ -2079,7 +2082,7 @@ const listingController = {
           reason: blocked.reason || 'Blocked'
         };
       });
-      
+
       res.status(200).json({
         status: 'success',
         results: formattedBlockedDates.length,
@@ -2100,28 +2103,28 @@ const listingController = {
   async getPublicAvailabilityMode(req, res, next) {
     try {
       const { id } = req.params;
-      
+
       // Check if listing exists
       const [listing] = await db.query(
         'SELECT * FROM listings WHERE id = ? AND active = 1',
         [id]
       );
-      
+
       if (!listing) {
         return res.status(404).json({
           status: 'error',
           message: 'Listing not found or not active'
         });
       }
-      
+
       // Get availability mode
       const [availabilitySettings] = await db.query(
         'SELECT availability_mode FROM listing_settings WHERE listing_id = ?',
         [id]
       );
-      
+
       const mode = availabilitySettings?.availability_mode || 'available-by-default';
-      
+
       res.status(200).json({
         status: 'success',
         data: {
@@ -2159,9 +2162,9 @@ const listingController = {
 
       // Calculate smart pricing
       const smartPricing = smartPricingUtils.calculateSmartPrice(
-        listing, 
-        startDate, 
-        endDate, 
+        listing,
+        startDate,
+        endDate,
         unit_type
       );
 

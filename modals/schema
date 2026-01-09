@@ -7,6 +7,7 @@ CREATE TABLE users (
     profile_image TEXT,
     is_provider BOOLEAN DEFAULT FALSE,
     is_agent BOOLEAN DEFAULT FALSE,
+    is_doctor BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -23,6 +24,7 @@ CREATE TABLE listings (
     user_id INT NOT NULL,
     category_id INT NOT NULL,
     listing_type ENUM('property', 'vehicle', 'service') NOT NULL,
+    is_doctor_listing BOOLEAN DEFAULT FALSE,
     title VARCHAR(200) NOT NULL,
     description TEXT,
     price_per_hour DECIMAL(10,2),

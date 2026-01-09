@@ -17,12 +17,12 @@ const listingModel = {
   async getAll(filters = {}, page = 1, limit = 10) {
     try {
       const offset = (page - 1) * limit;
-      
+
       // Determine if we need to join with property details tables based on filters
       const needsPropertyDetailsJoin = filters.max_guests || filters.bedrooms || filters.beds || filters.bathrooms || filters.room_type;
       const needsCarDetailsJoin = filters.category_id === 2; // Assuming category_id 2 is for car rentals
       const needsServiceDetailsJoin = filters.category_id !== 1 && filters.category_id !== 2; // Not accommodations or cars
-      
+
       let query = `
         SELECT l.*, c.name as category_name, c.translated_name as category_translated_name, 
                u.name as host_name, u.profile_image as host_image,
@@ -34,43 +34,43 @@ const listingModel = {
         JOIN categories c ON l.category_id = c.id
         LEFT JOIN categories pc ON c.parent_id = pc.id
       `;
-      
+
       // Add joins for property details if needed
       if (needsPropertyDetailsJoin) {
         query += `
           LEFT JOIN listing_property_details lpd ON l.id = lpd.listing_id
         `;
       }
-      
+
       // Add joins for car details if needed
       if (needsCarDetailsJoin) {
         query += `
           LEFT JOIN listing_car_details lcd ON l.id = lcd.listing_id
         `;
       }
-      
+
       // Add joins for service details if needed
       if (needsServiceDetailsJoin) {
         query += `
           LEFT JOIN service_details lsd ON l.id = lsd.listing_id
         `;
       }
-      
+
       // Start WHERE clause
       query += ` WHERE l.active = 1`;
-      
+
       const params = [];
-      
+
       // Add filters if provided
       if (Object.keys(filters).length > 0) {
         const filterConditions = [];
-        
+
         // Handle combined search filter (searches in both title and location)
         if (filters.search) {
           filterConditions.push('(l.title LIKE ? OR l.location LIKE ? OR l.description LIKE ?)');
           params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
         }
-        
+
         // Handle category filtering - can be direct category_id or main_category_id
         if (filters.category_id) {
           // Check if this is a main category with subcategories
@@ -84,23 +84,23 @@ const listingModel = {
             params.push(filters.category_id);
           }
         }
-        
+
         // Filter by main_category_id (parent_id)
         if (filters.main_category_id) {
           filterConditions.push('pc.id = ?');
           params.push(filters.main_category_id);
         }
-        
+
         if (filters.title) {
           filterConditions.push('l.title LIKE ?');
           params.push(`%${filters.title}%`);
         }
-        
+
         if (filters.location) {
           filterConditions.push('l.location LIKE ?');
           params.push(`%${filters.location}%`);
         }
-        
+
         if (filters.min_price) {
           if (filters.is_hourly) {
             filterConditions.push('l.price_per_hour >= ?');
@@ -109,7 +109,7 @@ const listingModel = {
           }
           params.push(parseFloat(filters.min_price));
         }
-        
+
         if (filters.max_price) {
           if (filters.is_hourly) {
             filterConditions.push('l.price_per_hour <= ?');
@@ -118,68 +118,73 @@ const listingModel = {
           }
           params.push(parseFloat(filters.max_price));
         }
-        
+
         if (filters.is_hourly !== undefined) {
           filterConditions.push('l.is_hourly = ?');
           params.push(filters.is_hourly ? 1 : 0);
         }
-        
+
         if (filters.user_id) {
           filterConditions.push('l.user_id = ?');
           params.push(filters.user_id);
         }
-        
+
+        if (filters.is_doctor_listing !== undefined) {
+          filterConditions.push('l.is_doctor_listing = ?');
+          params.push(filters.is_doctor_listing ? 1 : 0);
+        }
+
         if (filters.min_rating) {
           filterConditions.push('l.rating >= ?');
           params.push(parseFloat(filters.min_rating));
         }
-        
+
         // Property detail filters - now using the joined table
         if (filters.max_guests) {
           filterConditions.push('lpd.max_guests >= ?');
           params.push(parseInt(filters.max_guests));
         }
-        
+
         if (filters.bedrooms) {
           filterConditions.push('lpd.bedrooms >= ?');
           params.push(parseInt(filters.bedrooms));
         }
-        
+
         if (filters.beds) {
           filterConditions.push('lpd.beds >= ?');
           params.push(parseInt(filters.beds));
         }
-        
+
         if (filters.bathrooms) {
           filterConditions.push('lpd.bathrooms >= ?');
           params.push(parseFloat(filters.bathrooms));
         }
-        
+
         if (filters.room_type) {
           filterConditions.push('lpd.room_type = ?');
           params.push(filters.room_type);
         }
-        
+
         if (filters.instant_booking !== undefined) {
           filterConditions.push('l.instant_booking = ?');
           params.push(filters.instant_booking ? 1 : 0);
         }
-        
+
         if (filters.cancellation_policy) {
           filterConditions.push('l.cancellation_policy = ?');
           params.push(filters.cancellation_policy);
         }
-        
+
         // Date availability filtering
         if (filters.start_date && filters.end_date) {
           const startDate = new Date(filters.start_date);
           const endDate = new Date(filters.end_date);
-          
+
           if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
             // Format dates for MySQL
             // If the input is just a date (YYYY-MM-DD), add time components
             let formattedStartDate, formattedEndDate;
-            
+
             // Check if the date strings include time components
             if (!filters.start_date.includes('T') && !filters.start_date.includes(' ')) {
               // Date only format - set to beginning of day
@@ -188,7 +193,7 @@ const listingModel = {
               // Already has time component
               formattedStartDate = startDate.toISOString().slice(0, 19).replace('T', ' ');
             }
-            
+
             if (!filters.end_date.includes('T') && !filters.end_date.includes(' ')) {
               // Date only format - set to end of day
               formattedEndDate = `${filters.end_date} 23:59:59`;
@@ -196,7 +201,7 @@ const listingModel = {
               // Already has time component
               formattedEndDate = endDate.toISOString().slice(0, 19).replace('T', ' ');
             }
-                        
+
             // Exclude listings that have blocked dates or bookings during the requested period
             filterConditions.push(`
               l.id NOT IN (
@@ -209,7 +214,7 @@ const listingModel = {
               )
             `);
             params.push(formattedEndDate, formattedStartDate, formattedStartDate, formattedEndDate, formattedStartDate, formattedEndDate);
-            
+
             // Also exclude listings with bookings during this period
             filterConditions.push(`
               l.id NOT IN (
@@ -223,7 +228,7 @@ const listingModel = {
               )
             `);
             params.push(formattedEndDate, formattedStartDate, formattedStartDate, formattedEndDate, formattedStartDate, formattedEndDate);
-            
+
             // Handle listings with blocked-by-default availability mode - USING AVAILABLE_SLOTS TABLE
             filterConditions.push(`
               NOT EXISTS (
@@ -242,12 +247,12 @@ const listingModel = {
             params.push(formattedEndDate, formattedStartDate);
           }
         }
-        
+
         if (filters.amenities) {
-          const amenityIds = Array.isArray(filters.amenities) 
-            ? filters.amenities 
+          const amenityIds = Array.isArray(filters.amenities)
+            ? filters.amenities
             : [filters.amenities];
-          
+
           // Count how many of the requested amenities each listing has
           query += `
             AND l.id IN (
@@ -260,17 +265,17 @@ const listingModel = {
           `;
           params.push(...amenityIds);
         }
-        
+
         if (filterConditions.length > 0) {
           query += ' AND ' + filterConditions.join(' AND ');
         }
       }
-      
+
       // Add sorting
       if (filters.sort_by) {
         let sortField = 'l.created_at';
         let sortOrder = 'DESC';
-        
+
         switch (filters.sort_by) {
           case 'price_low':
             sortField = filters.is_hourly ? 'l.price_per_hour' : 'l.price_per_day';
@@ -289,19 +294,19 @@ const listingModel = {
             sortOrder = 'DESC';
             break;
         }
-        
+
         query += ` ORDER BY ${sortField} ${sortOrder}`;
       } else {
-      query += ' ORDER BY l.created_at DESC';
+        query += ' ORDER BY l.created_at DESC';
       }
-      
+
       // Add pagination - ensure limit and offset are integers
       const limitInt = parseInt(limit);
       const offsetInt = parseInt(offset);
       query += ` LIMIT ${limitInt} OFFSET ${offsetInt}`;
-      
+
       const listings = await db.query(query, params);
-      
+
       // Add pricing options with unified duration pricing for each listing
       if (listings.length > 0) {
         const listingIds = listings.map(l => l.id);
@@ -335,13 +340,13 @@ const listingModel = {
         for (const listing of listings) {
           // Get pricing options for this listing
           listing.pricing_options = await pricingOptionModel.getByListingId(listing.id);
-          
+
           // Add unified pricing information to the main listing object
           if (listing.pricing_options && listing.pricing_options.length > 0) {
             const defaultOption = listing.pricing_options.find(option => option.is_default) || listing.pricing_options[0];
             listing.price_duration = defaultOption.duration || 1;
             listing.price_unit_type = defaultOption.unit_type || listing.unit_type;
-            
+
             // Calculate unified price for the duration period
             listing.unified_price = defaultOption.price;
             listing.unified_duration = defaultOption.duration || 1;
@@ -351,14 +356,14 @@ const listingModel = {
           listing.amenities = amenitiesMap[listing.id] || [];
         }
       }
-      
+
       return listings;
     } catch (error) {
       console.error('Error getting listings:', error);
       throw error;
     }
   },
-  
+
   /**
    * Get listing by ID
    * @param {number} id - Listing ID
@@ -379,15 +384,15 @@ const listingModel = {
         LEFT JOIN categories pc ON c.parent_id = pc.id
         WHERE l.id = ?
       `;
-      
+
       const listings = await db.query(query, [id]);
-      
+
       if (listings.length === 0) {
         throw notFound('Listing not found');
       }
-      
+
       const listing = listings[0];
-      
+
       // Get listing photos
       const photosQuery = `
         SELECT id, image_url, is_cover
@@ -395,28 +400,28 @@ const listingModel = {
         WHERE listing_id = ?
         ORDER BY is_cover DESC, id ASC
       `;
-      
+
       listing.photos = await db.query(photosQuery, [id]);
-      
+
       // Get pricing options with duration
       listing.pricing_options = await pricingOptionModel.getByListingId(id);
-      
+
       // Add unified pricing information to the main listing object
       if (listing.pricing_options && listing.pricing_options.length > 0) {
         const defaultOption = listing.pricing_options.find(option => option.is_default) || listing.pricing_options[0];
         listing.price_duration = defaultOption.duration || 1;
         listing.price_unit_type = defaultOption.unit_type || listing.unit_type;
-        
+
         // Calculate unified price for the duration period
         listing.unified_price = defaultOption.price;
         listing.unified_duration = defaultOption.duration || 1;
         listing.price_per_unit = listing.unified_price / listing.unified_duration;
       }
-      
+
       // Get special pricing for this listing
       const specialPricingModel = require('./specialPricingModel');
       listing.special_pricing = await specialPricingModel.getByListingId(id);
-      
+
       // Get type-specific details based on listing_type
       if (listing.listing_type === 'property') {
         const propertyQuery = `
@@ -471,7 +476,7 @@ const listingModel = {
           listing.subscription_details = subscriptionDetails[0];
         }
       }
-      
+
       // Get amenities
       const amenitiesQuery = `
         SELECT a.*
@@ -479,9 +484,9 @@ const listingModel = {
         JOIN amenities a ON la.amenity_id = a.id
         WHERE la.listing_id = ?
       `;
-      
+
       listing.amenities = await db.query(amenitiesQuery, [id]);
-      
+
       // Get house rules
       const rulesQuery = `
         SELECT hr.id, hr.name, hr.icon, lhr.allowed, lhr.description
@@ -489,9 +494,9 @@ const listingModel = {
         JOIN house_rules hr ON lhr.rule_id = hr.id
         WHERE lhr.listing_id = ?
       `;
-      
+
       listing.house_rules = await db.query(rulesQuery, [id]);
-      
+
       // Get safety features
       const featuresQuery = `
         SELECT sf.*
@@ -499,31 +504,31 @@ const listingModel = {
         JOIN safety_features sf ON lsf.feature_id = sf.id
         WHERE lsf.listing_id = ?
       `;
-      
+
       listing.safety_features = await db.query(featuresQuery, [id]);
-      
+
       // Get listing settings
       const settingsQuery = `
         SELECT * FROM listing_settings
         WHERE listing_id = ?
       `;
-      
+
       const settings = await db.query(settingsQuery, [id]);
       if (settings.length > 0) {
         listing.settings = settings[0];
       }
-      
+
       // Get host profile
       const hostProfileQuery = `
         SELECT * FROM host_profiles
         WHERE user_id = ?
       `;
-      
+
       const hostProfiles = await db.query(hostProfileQuery, [listing.user_id]);
       if (hostProfiles.length > 0) {
         listing.host_profile = hostProfiles[0];
       }
-      
+
       // Get reviews for the listing
       const reviewsQuery = `
         SELECT r.*, u.name as reviewer_name, u.profile_image as reviewer_image
@@ -532,16 +537,16 @@ const listingModel = {
         WHERE r.listing_id = ?
         ORDER BY r.created_at DESC
       `;
-      
+
       listing.reviews = await db.query(reviewsQuery, [id]);
-      
+
       return listing;
     } catch (error) {
       console.error('Error getting listing by ID:', error);
       throw error;
     }
   },
-  
+
   /**
    * Create a new listing
    * @param {Object} listingData - Listing data
@@ -554,6 +559,7 @@ const listingModel = {
         user_id,
         category_id,
         listing_type,
+        is_doctor_listing,
         title,
         description,
         price_per_hour,
@@ -565,7 +571,7 @@ const listingModel = {
         longitude,
         instant_booking,
         cancellation_policy,
-        
+
         // Property details
         property_type,
         max_guests,
@@ -575,7 +581,7 @@ const listingModel = {
         room_type,
         min_nights,
         max_nights,
-        
+
         // Car details
         brand,
         model,
@@ -584,7 +590,7 @@ const listingModel = {
         seats,
         fuel_type,
         mileage,
-        
+
         // Service details
         service_type,
         service_duration,
@@ -594,7 +600,7 @@ const listingModel = {
         remote_service,
         experience_years,
         appointment_required,
-        
+
         // Venue details
         venue_type,
         max_capacity,
@@ -604,7 +610,7 @@ const listingModel = {
         has_parking,
         has_sound_system,
         has_stage,
-        
+
         // Subscription details
         subscription_type,
         duration_days,
@@ -612,23 +618,23 @@ const listingModel = {
         includes_trainer,
         includes_classes,
         max_visits_per_week,
-        
+
         // Other data
         photos,
         amenities,
         house_rules,
         safety_features
       } = listingData;
-      
+
       // Validate required fields
       if (!user_id || !category_id || !listing_type || !title || !description) {
         throw badRequest('Missing required fields');
       }
-      
+
       // Start a transaction
       const connection = await db.getPool().getConnection();
       await connection.beginTransaction();
-      
+
       try {
         // Determine booking_type based on unit_type
         let booking_type = 'hourly'; // Default
@@ -641,7 +647,7 @@ const listingModel = {
         } else if (unit_type === 'appointment') {
           booking_type = 'appointment';
         }
-        
+
         // Determine slot_duration based on unit_type
         let slot_duration = null;
         if (unit_type === 'hour') {
@@ -649,17 +655,18 @@ const listingModel = {
         } else if (unit_type === 'appointment') {
           slot_duration = listingData.slot_duration ? parseInt(listingData.slot_duration, 10) : 30;
         }
-        
+
         // Insert listing
         const listingResult = await connection.query(
           `INSERT INTO listings (
-            user_id, category_id, listing_type, title, description, price_per_hour, price_per_day, price_per_half_night,
+            user_id, category_id, listing_type, is_doctor_listing, title, description, price_per_hour, price_per_day, price_per_half_night,
             unit_type, is_hourly, location, latitude, longitude, instant_booking, cancellation_policy, slot_duration, booking_type
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             user_id,
             category_id,
             listing_type,
+            is_doctor_listing ? 1 : 0,
             title,
             description,
             price_per_hour || null,
@@ -676,17 +683,17 @@ const listingModel = {
             booking_type
           ]
         );
-        
+
         const listingId = listingResult[0].insertId;
-        
+
         // Insert pricing options if provided
         if (listingData.pricing_options && Array.isArray(listingData.pricing_options) && listingData.pricing_options.length > 0) {
           await pricingOptionModel.createMultiple(listingId, listingData.pricing_options, connection);
-        } 
+        }
         // Create default pricing options based on legacy fields if no pricing options provided
         else if (price_per_hour || price_per_day || price_per_half_night) {
           const pricingOptions = [];
-          
+
           if (price_per_hour) {
             pricingOptions.push({
               price: price_per_hour,
@@ -695,7 +702,7 @@ const listingModel = {
               is_default: unit_type === 'hour'
             });
           }
-          
+
           if (price_per_day) {
             pricingOptions.push({
               price: price_per_day,
@@ -704,7 +711,7 @@ const listingModel = {
               is_default: unit_type === 'day'
             });
           }
-          
+
           if (price_per_half_night) {
             pricingOptions.push({
               price: price_per_half_night,
@@ -713,12 +720,12 @@ const listingModel = {
               is_default: unit_type === 'night'
             });
           }
-          
+
           if (pricingOptions.length > 0) {
             await pricingOptionModel.createMultiple(listingId, pricingOptions, connection);
           }
         }
-        
+
         // Insert type-specific details based on listing_type
         if (listing_type === 'property') {
           // Check if property details already exist
@@ -726,7 +733,7 @@ const listingModel = {
             'SELECT listing_id FROM listing_property_details WHERE listing_id = ?',
             [listingId]
           );
-          
+
           if (existingPropertyDetails.length === 0) {
             // Insert property details only if they don't exist
             const mg = max_guests != null ? Math.round(parseFloat(max_guests)) : null;
@@ -758,7 +765,7 @@ const listingModel = {
             'SELECT listing_id FROM listing_car_details WHERE listing_id = ?',
             [listingId]
           );
-          
+
           if (existingVehicleDetails.length === 0) {
             // Insert car details only if they don't exist
             await connection.query(
@@ -783,7 +790,7 @@ const listingModel = {
             'SELECT listing_id FROM service_details WHERE listing_id = ?',
             [listingId]
           );
-          
+
           if (existingServiceDetails.length === 0) {
             // Insert service details only if they don't exist
             await connection.query(
@@ -810,7 +817,7 @@ const listingModel = {
             'SELECT listing_id FROM listing_venue_details WHERE listing_id = ?',
             [listingId]
           );
-          
+
           if (existingVenueDetails.length === 0) {
             // Insert venue details only if they don't exist
             await connection.query(
@@ -837,7 +844,7 @@ const listingModel = {
             'SELECT listing_id FROM listing_subscription_details WHERE listing_id = ?',
             [listingId]
           );
-          
+
           if (existingSubscriptionDetails.length === 0) {
             // Insert subscription details only if they don't exist
             await connection.query(
@@ -857,7 +864,7 @@ const listingModel = {
             );
           }
         }
-        
+
         // Insert photos if provided
         if (photos && photos.length > 0) {
           for (const photo of photos) {
@@ -866,7 +873,7 @@ const listingModel = {
               'SELECT * FROM listing_photos WHERE listing_id = ? AND image_url = ?',
               [listingId, photo.image_url]
             );
-            
+
             // Only insert if the photo doesn't already exist for this listing
             if (existingPhoto.length === 0) {
               await connection.query(
@@ -876,7 +883,7 @@ const listingModel = {
             }
           }
         }
-        
+
         // Insert amenities if provided
         if (amenities && amenities.length > 0) {
           for (const amenityId of amenities) {
@@ -885,7 +892,7 @@ const listingModel = {
               'SELECT * FROM listing_amenities WHERE listing_id = ? AND amenity_id = ?',
               [listingId, amenityId]
             );
-            
+
             // Only insert if the amenity doesn't already exist for this listing
             if (existingAmenity.length === 0) {
               await connection.query(
@@ -895,7 +902,7 @@ const listingModel = {
             }
           }
         }
-        
+
         // Insert house rules if provided
         if (house_rules && house_rules.length > 0) {
           for (const rule of house_rules) {
@@ -904,7 +911,7 @@ const listingModel = {
               'SELECT * FROM listing_house_rules WHERE listing_id = ? AND rule_id = ?',
               [listingId, rule.rule_id]
             );
-            
+
             if (existingRule.length === 0) {
               // Only insert if the rule doesn't already exist for this listing
               await connection.query(
@@ -922,7 +929,7 @@ const listingModel = {
             }
           }
         }
-        
+
         // Insert safety features if provided
         if (safety_features && safety_features.length > 0) {
           for (const featureId of safety_features) {
@@ -931,7 +938,7 @@ const listingModel = {
               'SELECT * FROM listing_safety_features WHERE listing_id = ? AND feature_id = ?',
               [listingId, featureId]
             );
-            
+
             // Only insert if the safety feature doesn't already exist for this listing
             if (existingFeature.length === 0) {
               await connection.query(
@@ -945,12 +952,12 @@ const listingModel = {
         // Insert special pricing if provided
         if (listingData.special_pricing && Array.isArray(listingData.special_pricing) && listingData.special_pricing.length > 0) {
           const specialPricingModel = require('./specialPricingModel');
-          
+
           for (const specialPricing of listingData.special_pricing) {
             try {
               // Set the listing ID
               specialPricing.listing_id = listingId;
-              
+
               // Create special pricing entry
               await specialPricingModel.create(specialPricing, connection);
             } catch (error) {
@@ -959,13 +966,13 @@ const listingModel = {
             }
           }
         }
-        
+
         // Check if listing settings already exist
         const [existingSettings] = await connection.query(
           'SELECT listing_id FROM listing_settings WHERE listing_id = ?',
           [listingId]
         );
-        
+
         if (existingSettings.length === 0) {
           // Create default listing settings only if they don't exist
           await connection.query(
@@ -982,10 +989,10 @@ const listingModel = {
             ]
           );
         }
-        
+
         // Commit transaction
         await connection.commit();
-        
+
         // Return the created listing
         return this.getById(listingId);
       } catch (error) {
@@ -1002,7 +1009,7 @@ const listingModel = {
       throw error;
     }
   },
-  
+
   /**
    * Update a listing
    * @param {number} id - Listing ID
@@ -1012,25 +1019,25 @@ const listingModel = {
   async update(id, listingData) {
     // Initialize connection outside try block so it's available in finally
     let connection = null;
-    
+
     try {
       // Check if listing exists
       const existingListing = await db.getById('listings', id);
-      
+
       if (!existingListing) {
         throw notFound('Listing not found');
       }
-      
+
       // Start a transaction
       connection = await db.getPool().getConnection();
       await connection.beginTransaction();
-      
+
       try {
         // Extract related data
-        const { 
-          photos, 
-          amenities, 
-          house_rules, 
+        const {
+          photos,
+          amenities,
+          house_rules,
           safety_features,
           property_details = {},
           car_details = {},
@@ -1040,15 +1047,15 @@ const listingModel = {
           blocked_dates,
           pricing_options
         } = listingData;
-        
+
         // Define the fields that belong to the main listings table
         const validListingFields = [
-          'user_id', 'category_id', 'listing_type', 'title', 'description',
+          'user_id', 'category_id', 'listing_type', 'is_doctor_listing', 'title', 'description',
           'price_per_hour', 'price_per_day', 'price_per_half_night', 'unit_type',
           'is_hourly', 'location', 'latitude', 'longitude', 'instant_booking',
           'cancellation_policy', 'rating', 'review_count', 'active'
         ];
-        
+
         // Create a clean mainListingData object with only valid fields
         const mainListingData = {};
         Object.keys(listingData).forEach(key => {
@@ -1056,7 +1063,7 @@ const listingModel = {
             mainListingData[key] = listingData[key];
           }
         });
-        
+
         // Set booking_type based on unit_type if unit_type is provided
         if (listingData.unit_type) {
           if (listingData.unit_type === 'hour') {
@@ -1069,7 +1076,7 @@ const listingModel = {
             mainListingData.booking_type = 'appointment';
           }
         }
-        
+
         // Handle slot_duration for hour and appointment unit types
         if (listingData.unit_type === 'hour' || listingData.unit_type === 'appointment') {
           if (listingData.slot_duration) {
@@ -1080,7 +1087,7 @@ const listingModel = {
             mainListingData.slot_duration = 30; // Default for appointment
           }
         }
-        
+
         // Process property-specific fields
         if (listingData.property_type) property_details.property_type = listingData.property_type;
         if (listingData.max_guests) property_details.max_guests = Math.round(parseFloat(listingData.max_guests));
@@ -1090,7 +1097,7 @@ const listingModel = {
         if (listingData.room_type) property_details.room_type = listingData.room_type;
         if (listingData.min_nights) property_details.min_nights = Math.round(parseFloat(listingData.min_nights));
         if (listingData.max_nights) property_details.max_nights = Math.round(parseFloat(listingData.max_nights));
-        
+
         // Process car-specific fields
         if (listingData.brand) car_details.brand = listingData.brand;
         if (listingData.model) car_details.model = listingData.model;
@@ -1099,7 +1106,7 @@ const listingModel = {
         if (listingData.seats) car_details.seats = listingData.seats;
         if (listingData.fuel_type) car_details.fuel_type = listingData.fuel_type;
         if (listingData.mileage) car_details.mileage = listingData.mileage;
-        
+
         // Process service-specific fields
         if (listingData.service_type) service_details.service_type = listingData.service_type;
         if (listingData.service_duration) service_details.service_duration = listingData.service_duration;
@@ -1109,7 +1116,7 @@ const listingModel = {
         if (listingData.remote_service !== undefined) service_details.remote_service = listingData.remote_service;
         if (listingData.experience_years) service_details.experience_years = listingData.experience_years;
         if (listingData.appointment_required !== undefined) service_details.appointment_required = listingData.appointment_required;
-        
+
         // Process subscription-specific fields
         if (listingData.subscription_type) subscription_details.subscription_type = listingData.subscription_type;
         if (listingData.duration_days) subscription_details.duration_days = listingData.duration_days;
@@ -1117,7 +1124,7 @@ const listingModel = {
         if (listingData.includes_trainer !== undefined) subscription_details.includes_trainer = listingData.includes_trainer;
         if (listingData.includes_classes !== undefined) subscription_details.includes_classes = listingData.includes_classes;
         if (listingData.max_visits_per_week) subscription_details.max_visits_per_week = listingData.max_visits_per_week;
-        
+
         // Process venue-specific fields
         if (listingData.venue_type) venue_details.venue_type = listingData.venue_type;
         if (listingData.max_capacity) venue_details.max_capacity = listingData.max_capacity;
@@ -1127,29 +1134,29 @@ const listingModel = {
         if (listingData.has_parking !== undefined) venue_details.has_parking = listingData.has_parking;
         if (listingData.has_sound_system !== undefined) venue_details.has_sound_system = listingData.has_sound_system;
         if (listingData.has_stage !== undefined) venue_details.has_stage = listingData.has_stage;
-        
-              // Update main listing if there are fields to update
-      if (Object.keys(mainListingData).length > 0) {
-        try {
-          await connection.query(
-            'UPDATE listings SET ? WHERE id = ?',
-            [mainListingData, id]
-          );
-        } catch (error) {
-          console.error('Error updating listing main data:', error);
-          throw error;
+
+        // Update main listing if there are fields to update
+        if (Object.keys(mainListingData).length > 0) {
+          try {
+            await connection.query(
+              'UPDATE listings SET ? WHERE id = ?',
+              [mainListingData, id]
+            );
+          } catch (error) {
+            console.error('Error updating listing main data:', error);
+            throw error;
+          }
         }
-      }
-        
+
         // Check if listing type has changed
         const listingType = mainListingData.listing_type || existingListing.listing_type;
         const hasListingTypeChanged = mainListingData.listing_type && mainListingData.listing_type !== existingListing.listing_type;
-        
+
         // Update photos if provided
         if (photos) {
           // Delete existing photos
           await connection.query('DELETE FROM listing_photos WHERE listing_id = ?', [id]);
-          
+
           // Insert new photos
           if (photos.length > 0) {
             for (let i = 0; i < photos.length; i++) {
@@ -1161,12 +1168,12 @@ const listingModel = {
             }
           }
         }
-        
+
         // Update amenities if provided
         if (amenities) {
           // Delete existing amenities
           await connection.query('DELETE FROM listing_amenities WHERE listing_id = ?', [id]);
-          
+
           // Insert new amenities
           if (amenities.length > 0) {
             for (const amenityId of amenities) {
@@ -1177,12 +1184,12 @@ const listingModel = {
             }
           }
         }
-        
+
         // Update house rules if provided
         if (house_rules) {
           // Delete existing house rules
           await connection.query('DELETE FROM listing_house_rules WHERE listing_id = ?', [id]);
-          
+
           // Insert new house rules
           if (house_rules.length > 0) {
             for (const rule of house_rules) {
@@ -1193,12 +1200,12 @@ const listingModel = {
             }
           }
         }
-        
+
         // Update safety features if provided
         if (safety_features) {
           // Delete existing safety features
           await connection.query('DELETE FROM listing_safety_features WHERE listing_id = ?', [id]);
-          
+
           // Insert new safety features
           if (safety_features.length > 0) {
             for (const featureId of safety_features) {
@@ -1209,17 +1216,17 @@ const listingModel = {
             }
           }
         }
-        
+
         // Get the category ID from existing listing or updated data
         const categoryId = mainListingData.category_id || existingListing.category_id;
-        
+
         // Determine which detail tables to update based on listing type
         const isProperty = listingType === 'property';
         const isVehicle = listingType === 'vehicle';
         const isService = listingType === 'service';
         const isVenue = listingType === 'venue';
         const isSubscription = listingType === 'subscription';
-        
+
         // Update property details if provided (for accommodations)
         if (Object.keys(property_details).length > 0 && isProperty) {
           // Check if property details exist
@@ -1227,7 +1234,7 @@ const listingModel = {
             'SELECT listing_id FROM listing_property_details WHERE listing_id = ?',
             [id]
           );
-          
+
           if (existingPropertyDetails.length > 0) {
             // Update existing property details
             await connection.query(
@@ -1242,7 +1249,7 @@ const listingModel = {
             );
           }
         }
-        
+
         // Update car details if provided (for car rentals)
         if (Object.keys(car_details).length > 0 && isVehicle) {
           // Check if car details exist
@@ -1250,7 +1257,7 @@ const listingModel = {
             'SELECT listing_id FROM listing_car_details WHERE listing_id = ?',
             [id]
           );
-          
+
           if (existingCarDetails.length > 0) {
             // Update existing car details
             await connection.query(
@@ -1265,7 +1272,7 @@ const listingModel = {
             );
           }
         }
-        
+
         // Update service details if provided (for services)
         if (Object.keys(service_details).length > 0 && isService) {
           // Check if service details exist
@@ -1273,7 +1280,7 @@ const listingModel = {
             'SELECT listing_id FROM service_details WHERE listing_id = ?',
             [id]
           );
-          
+
           if (existingServiceDetails.length > 0) {
             // Update existing service details
             await connection.query(
@@ -1288,7 +1295,7 @@ const listingModel = {
             );
           }
         }
-        
+
         // Update venue details if provided (for venues)
         if (Object.keys(venue_details).length > 0 && isVenue) {
           // Check if venue details exist
@@ -1296,7 +1303,7 @@ const listingModel = {
             'SELECT listing_id FROM listing_venue_details WHERE listing_id = ?',
             [id]
           );
-          
+
           if (existingVenueDetails.length > 0) {
             // Update existing venue details
             await connection.query(
@@ -1311,7 +1318,7 @@ const listingModel = {
             );
           }
         }
-        
+
         // Update subscription details if provided (for subscriptions)
         if (Object.keys(subscription_details).length > 0 && isSubscription) {
           // Check if subscription details exist
@@ -1319,7 +1326,7 @@ const listingModel = {
             'SELECT listing_id FROM listing_subscription_details WHERE listing_id = ?',
             [id]
           );
-          
+
           if (existingSubscriptionDetails.length > 0) {
             // Update existing subscription details
             await connection.query(
@@ -1334,7 +1341,7 @@ const listingModel = {
             );
           }
         }
-        
+
         // Handle listing type changes - clean up old type-specific details
         if (hasListingTypeChanged) {
           // Remove details from tables that no longer apply to the new listing type
@@ -1354,12 +1361,12 @@ const listingModel = {
             await connection.query('DELETE FROM listing_subscription_details WHERE listing_id = ?', [id]);
           }
         }
-        
+
         // Update blocked dates if provided
         if (blocked_dates) {
           // Delete existing blocked dates
           await connection.query('DELETE FROM blocked_dates WHERE listing_id = ?', [id]);
-          
+
           // Insert new blocked dates
           if (blocked_dates.length > 0) {
             for (const blockedDate of blocked_dates) {
@@ -1370,7 +1377,7 @@ const listingModel = {
             }
           }
         }
-        
+
         // Process pricing options if provided
         if (pricing_options && Array.isArray(pricing_options)) {
           // Use the pricing option model to handle pricing options
@@ -1381,16 +1388,16 @@ const listingModel = {
         // Process special pricing if provided
         if (listingData.special_pricing && Array.isArray(listingData.special_pricing)) {
           const specialPricingModel = require('./specialPricingModel');
-          
+
           // Delete existing special pricing for this listing
           await connection.query('DELETE FROM special_pricing WHERE listing_id = ?', [id]);
-          
+
           // Insert new special pricing entries
           for (const specialPricing of listingData.special_pricing) {
             try {
               // Set the listing ID
               specialPricing.listing_id = id;
-              
+
               // Create special pricing entry
               await specialPricingModel.create(specialPricing, connection);
             } catch (error) {
@@ -1399,13 +1406,13 @@ const listingModel = {
             }
           }
         }
-        
+
         // Commit transaction
         await connection.commit();
-        
+
         // Get the updated listing with all details
         const updatedListing = await this.getById(id);
-        
+
         return updatedListing;
       } catch (error) {
         // Rollback transaction on error
@@ -1427,7 +1434,7 @@ const listingModel = {
       throw error;
     }
   },
-  
+
   /**
    * Delete a listing
    * @param {number} id - Listing ID
@@ -1437,32 +1444,32 @@ const listingModel = {
     try {
       // Check if listing exists
       const listing = await db.getById('listings', id);
-      
+
       if (!listing) {
         throw notFound('Listing not found');
       }
-      
+
       // Check if listing has active bookings
       const bookings = await db.query(
         `SELECT id FROM bookings 
          WHERE listing_id = ? AND status IN ('pending', 'confirmed')`,
         [id]
       );
-      
+
       if (bookings.length > 0) {
         throw badRequest('Cannot delete listing with active bookings');
       }
-      
+
       // Delete listing (this will cascade delete related data)
       await db.remove('listings', id);
-      
+
       return true;
     } catch (error) {
       console.error('Error deleting listing:', error);
       throw error;
     }
   },
-  
+
   /**
    * Get amenities list
    * @returns {Promise<Array>} - List of amenities
@@ -1476,7 +1483,7 @@ const listingModel = {
       throw error;
     }
   },
-  
+
   /**
    * Get house rules list
    * @returns {Promise<Array>} - List of house rules
@@ -1490,7 +1497,7 @@ const listingModel = {
       throw error;
     }
   },
-  
+
   /**
    * Get safety features list
    * @returns {Promise<Array>} - List of safety features
@@ -1504,7 +1511,7 @@ const listingModel = {
       throw error;
     }
   },
-  
+
   /**
    * Get main categories (parent_id is NULL)
    * @returns {Promise<Array>} - List of main categories
@@ -1518,7 +1525,7 @@ const listingModel = {
       throw error;
     }
   },
-  
+
   /**
    * Get subcategories by parent ID
    * @param {number} parentId - Parent category ID
@@ -1533,7 +1540,7 @@ const listingModel = {
       throw error;
     }
   },
-  
+
   /**
    * Get category with its parent info
    * @param {number} categoryId - Category ID
@@ -1547,20 +1554,20 @@ const listingModel = {
         LEFT JOIN categories p ON c.parent_id = p.id
         WHERE c.id = ?
       `;
-      
+
       const categories = await db.query(query, [categoryId]);
-      
+
       if (categories.length === 0) {
         throw notFound('Category not found');
       }
-      
+
       return categories[0];
     } catch (error) {
       console.error('Error getting category with parent:', error);
       throw error;
     }
   },
-  
+
   /**
    * Get cancellation policies list
    * @returns {Promise<Array>} - List of cancellation policies
@@ -1574,7 +1581,7 @@ const listingModel = {
       throw error;
     }
   },
-  
+
   /**
    * Report a listing
    * @param {number} listingId - Listing ID
@@ -1586,11 +1593,11 @@ const listingModel = {
     try {
       // Check if listing exists
       const listing = await db.getById('listings', listingId);
-      
+
       if (!listing) {
         throw notFound('Listing not found');
       }
-      
+
       // Create report
       const data = {
         listing_id: listingId,
@@ -1598,19 +1605,19 @@ const listingModel = {
         reason: reportData.reason,
         description: reportData.description
       };
-      
+
       const result = await db.insert('listing_reports', data);
-      
+
       // Get created report
       const report = await db.getById('listing_reports', result.insertId);
-      
+
       return report;
     } catch (error) {
       console.error('Error reporting listing:', error);
       throw error;
     }
   },
-  
+
   /**
    * Check if a listing is available for a given time period
    * @param {number} listingId - Listing ID
@@ -1622,11 +1629,11 @@ const listingModel = {
     try {
       // Check if listing exists
       const listing = await this.getById(listingId);
-      
+
       if (!listing) {
         throw notFound('Listing not found');
       }
-      
+
       // Format datetime strings for MySQL with proper timezone handling
       const formatDateForMySQL = (dateString) => {
         // If already in MySQL format (YYYY-MM-DD HH:MM:SS), return as-is
@@ -1653,7 +1660,7 @@ const listingModel = {
         // Fallback: return as-is
         return dateString;
       };
-      
+
       const formattedStartDatetime = formatDateForMySQL(startDatetime);
       let formattedEndDatetime;
 
@@ -1662,20 +1669,20 @@ const listingModel = {
       } else {
         formattedEndDatetime = formatDateForMySQL(endDatetime);
       }
-      
+
       // Get the availability mode for this listing
       const [listingSettings] = await db.query(
         'SELECT availability_mode FROM listing_settings WHERE listing_id = ?',
         [listingId]
       );
-      
+
       const availabilityMode = listingSettings?.availability_mode || 'available-by-default';
-      
+
       // CRITICAL FIX: For day/night/appointment listings, use slot-based availability checking
       if (listing.unit_type === 'day' || listing.unit_type === 'night' || listing.unit_type === 'appointment') {
         // Get available slots for the date range using the same logic as frontend
         const { getPublicAvailableSlots } = require('../controllers/hostController');
-        
+
         // Convert MySQL datetime format to ISO format for Date constructor
         const mysqlToIso = (mysqlDatetime) => {
           if (!mysqlDatetime || typeof mysqlDatetime !== 'string') {
@@ -1684,15 +1691,15 @@ const listingModel = {
           }
           return mysqlDatetime.replace(' ', 'T') + 'Z';
         };
-        
+
         let startDate, endDate;
         try {
           const startIso = mysqlToIso(formattedStartDatetime);
           const endIso = mysqlToIso(formattedEndDatetime);
-          
+
           const startDateObj = new Date(startIso);
           const endDateObj = new Date(endIso);
-          
+
           if (isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
             console.error('🚨 [DEBUG] Invalid Date objects created:', {
               startDateObj: startDateObj.toString(),
@@ -1702,22 +1709,22 @@ const listingModel = {
             });
             throw new Error('Invalid Date objects created from datetime strings');
           }
-          
+
           startDate = startDateObj.toISOString().split('T')[0];
           endDate = endDateObj.toISOString().split('T')[0];
-          
+
         } catch (dateError) {
           console.error('🚨 [DEBUG] Error in date conversion:', dateError);
           throw dateError;
         }
-        
+
         try {
           const availableSlots = await getPublicAvailableSlots(listingId, startDate, endDate);
-          
+
           if (availableSlots.length === 0) {
             return false;
           }
-          
+
           // For day/night listings with booking_period, check if any slot matches the requested period
           if (bookingPeriod && ['morning', 'day', 'night'].includes(bookingPeriod)) {
             // Check if any slot matches the requested booking period
@@ -1726,10 +1733,10 @@ const listingModel = {
               const slotEnd = new Date(slot.end_datetime);
               const requestStart = new Date(formattedStartDatetime);
               const requestEnd = new Date(formattedEndDatetime);
-              
+
               // Slot must cover the entire requested period
               const coversTimeRange = slotStart <= requestStart && slotEnd >= requestEnd;
-              
+
               // For booking_period matching, check unit_type
               let periodMatches = false;
               if (bookingPeriod === 'morning' || bookingPeriod === 'day') {
@@ -1739,11 +1746,11 @@ const listingModel = {
                 // Check unit_type for night bookings
                 periodMatches = slot.unit_type === 'night' || listing.unit_type === 'night';
               }
-              
+
               const isMatch = coversTimeRange && periodMatches;
               return isMatch;
             });
-            
+
             return hasMatchingSlot;
           } else {
             // For appointment or when no booking_period specified, just check if there are any available slots
@@ -1753,12 +1760,12 @@ const listingModel = {
               const slotEnd = new Date(slot.end_datetime);
               const requestStart = new Date(formattedStartDatetime);
               const requestEnd = new Date(formattedEndDatetime);
-              
+
               // Slot must cover the entire requested period
               const coversTimeRange = slotStart <= requestStart && slotEnd >= requestEnd;
               return coversTimeRange;
             });
-            
+
             return hasAvailableSlot;
           }
         } catch (slotError) {
@@ -1766,9 +1773,9 @@ const listingModel = {
           // Fall back to basic availability check below
         }
       }
-      
+
       // CRITICAL FIX: Use the same logic as getPublicAvailableSlots to ensure consistency
-      try {        
+      try {
         // Get all available slots for this listing that might overlap with our booking period
         const availableSlotsQuery = `
           SELECT start_datetime, end_datetime
@@ -1782,34 +1789,34 @@ const listingModel = {
           )
           ORDER BY start_datetime
         `;
-        
+
         const availableSlots = await db.query(availableSlotsQuery, [
           listingId,
           formattedStartDatetime, formattedStartDatetime,
           formattedEndDatetime, formattedEndDatetime,
           formattedStartDatetime, formattedEndDatetime
         ]);
-        
+
         if (availableSlots.length === 0) {
           return false;
         }
-        
+
         // Check if any single slot covers the entire booking period
         // Convert booking times back to UTC for proper comparison with slot times
         const bookingStartUTC = new Date(startDatetime); // Original UTC time from frontend
         const bookingEndUTC = new Date(endDatetime); // Original UTC time from frontend
-        
+
         for (const slot of availableSlots) {
           const slotStart = new Date(slot.start_datetime);
           const slotEnd = new Date(slot.end_datetime);
-                    
+
           // Check if the slot covers the entire booking period
           // A slot covers a booking if it starts before or at the booking start time
           // AND ends after or at the booking end time
           const slotStartBeforeBooking = slotStart <= bookingStartUTC;
           const slotEndAfterBooking = slotEnd >= bookingEndUTC;
           const covers = slotStartBeforeBooking && slotEndAfterBooking;
-          
+
           if (covers) {
             // This slot covers the entire booking period, check for booking conflicts
             // CRITICAL FIX: Use proper overlap detection for booking conflicts
@@ -1821,57 +1828,57 @@ const listingModel = {
               AND status IN ('pending', 'confirmed', 'completed')
               AND start_datetime < ? AND end_datetime > ?
             `;
-            
-            
+
+
             const allPotentialConflicts = await db.query(bookingsQuery, [
               listingId,
               endDatetime,
               startDatetime
             ]);
-            
-            
+
+
             // Filter out adjacent bookings (not actual conflicts)
             const actualConflicts = allPotentialConflicts.filter(booking => {
               const bookingStart = new Date(booking.start_datetime);
               const bookingEnd = new Date(booking.end_datetime);
               const newBookingStart = new Date(startDatetime);
               const newBookingEnd = new Date(endDatetime);
-              
+
               // Check for actual overlap (not just adjacency)
               const hasOverlap = bookingStart < newBookingEnd && bookingEnd > newBookingStart;
-              
+
               return hasOverlap;
             });
-            
+
             const bookings = actualConflicts;
-            
-            
+
+
             if (bookings.length === 0) {
               return true;
             }
           }
         }
-                
+
         // If no single slot covers the period, check for continuous coverage
-        const sortedSlots = availableSlots.sort((a, b) => 
+        const sortedSlots = availableSlots.sort((a, b) =>
           new Date(a.start_datetime) - new Date(b.start_datetime)
         );
-        
+
         let currentCoverageEnd = bookingStartUTC;
-        
+
         for (const slot of sortedSlots) {
           const slotStart = new Date(slot.start_datetime);
           const slotEnd = new Date(slot.end_datetime);
-          
+
           // Skip slots that don't extend our coverage
           if (slotStart > currentCoverageEnd || slotEnd <= currentCoverageEnd) {
             continue;
           }
-          
+
           // If this slot connects to our current coverage
           if (slotStart <= currentCoverageEnd) {
             currentCoverageEnd = new Date(Math.max(currentCoverageEnd.getTime(), slotEnd.getTime()));
-            
+
             // If we've covered the entire booking period
             if (currentCoverageEnd >= bookingEndUTC) {
               // Check for booking conflicts with proper overlap detection
@@ -1881,37 +1888,37 @@ const listingModel = {
                 AND status IN ('pending', 'confirmed', 'completed')
                 AND start_datetime < ? AND end_datetime > ?
               `;
-              
+
               const allPotentialConflicts = await db.query(bookingsQuery, [
                 listingId,
                 endDatetime,
                 startDatetime
               ]);
-              
+
               // Filter out adjacent bookings (not actual conflicts)
               const actualConflicts = allPotentialConflicts.filter(booking => {
                 const bookingStart = new Date(booking.start_datetime);
                 const bookingEnd = new Date(booking.end_datetime);
                 const newBookingStart = new Date(startDatetime);
                 const newBookingEnd = new Date(endDatetime);
-                
+
                 // Check for actual overlap (not just adjacency)
                 return bookingStart < newBookingEnd && bookingEnd > newBookingStart;
               });
-              
+
               return actualConflicts.length === 0;
             }
           }
         }
-        
+
         // If we couldn't find continuous coverage, return false
         return false;
-        
+
       } catch (error) {
         console.error('Error checking available_slots table:', error);
         // If there's an error with the available_slots table, fall back to traditional checking
       }
-      
+
       // If available_slots check didn't work, fall back to traditional availability checking
       if (availabilityMode === 'blocked-by-default') {
         // In blocked-by-default mode, check if dates are explicitly available
@@ -1921,17 +1928,17 @@ const listingModel = {
           AND is_available = 1
           AND date BETWEEN DATE(?) AND DATE(?)
         `;
-        
+
         const availableDates = await db.query(availabilityQuery, [
           listingId,
           formattedStartDatetime,
           formattedEndDatetime
         ]);
-        
+
         const startDate = new Date(startDatetime);
         const endDate = new Date(endDatetime);
         const daysDiff = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
-        
+
         if (availableDates.length < daysDiff) {
           return false;
         }
@@ -1946,19 +1953,19 @@ const listingModel = {
             (start_datetime >= ? AND end_datetime <= ?)
           )
         `;
-        
+
         const blockedDates = await db.query(blockedDatesQuery, [
           listingId,
           formattedStartDatetime, formattedStartDatetime,
           formattedEndDatetime, formattedEndDatetime,
           formattedStartDatetime, formattedEndDatetime
         ]);
-        
+
         if (blockedDates.length > 0) {
           return false;
         }
       }
-      
+
       // Check for booking conflicts
       const bookingsQuery = `
         SELECT * FROM bookings 
@@ -1970,18 +1977,18 @@ const listingModel = {
           (start_datetime >= ? AND end_datetime <= ?)
         )
       `;
-      
+
       const bookings = await db.query(bookingsQuery, [
         listingId,
         formattedStartDatetime, formattedStartDatetime,
         formattedEndDatetime, formattedEndDatetime,
         formattedStartDatetime, formattedEndDatetime
       ]);
-      
+
       if (bookings.length > 0) {
         return false;
       }
-      
+
       return true;
     } catch (error) {
       console.error('Error checking availability:', error);
@@ -1990,7 +1997,7 @@ const listingModel = {
   },
 
 
-  
+
   /**
    * Add a photo to a listing
    * @param {number} listingId - Listing ID
@@ -2001,40 +2008,40 @@ const listingModel = {
     try {
       // Check if listing exists
       const listing = await db.getById('listings', listingId);
-      
+
       if (!listing) {
         throw notFound('Listing not found');
       }
-      
+
       // Get current photos count
       const photos = await db.query(
         'SELECT COUNT(*) as count FROM listing_photos WHERE listing_id = ?',
         [listingId]
       );
-      
+
       // Determine if this should be the cover photo (first photo is cover)
       const isCover = photos[0].count === 0;
-      
+
       // Insert the photo
       const result = await db.insert('listing_photos', {
         listing_id: listingId,
         image_url: imageUrl,
         is_cover: isCover ? 1 : 0
       });
-      
+
       // Get the inserted photo
       const insertedPhoto = await db.query(
         'SELECT * FROM listing_photos WHERE id = ?',
         [result.insertId]
       );
-      
+
       return insertedPhoto[0];
     } catch (error) {
       console.error('Error adding photo:', error);
       throw error;
     }
   },
-  
+
   /**
    * Delete a photo from a listing
    * @param {number} photoId - Photo ID
@@ -2047,33 +2054,33 @@ const listingModel = {
         'SELECT * FROM listing_photos WHERE id = ?',
         [photoId]
       );
-      
+
       if (!photo || photo.length === 0) {
         throw notFound('Photo not found');
       }
-      
+
       // Delete the photo
       await db.remove('listing_photos', photoId);
-      
+
       // If the deleted photo was the cover, set another photo as cover
       if (photo[0].is_cover) {
         const remainingPhotos = await db.query(
           'SELECT id FROM listing_photos WHERE listing_id = ? ORDER BY id ASC LIMIT 1',
           [photo[0].listing_id]
         );
-        
+
         if (remainingPhotos && remainingPhotos.length > 0) {
           await db.update('listing_photos', remainingPhotos[0].id, { is_cover: 1 });
         }
       }
-      
+
       return true;
     } catch (error) {
       console.error('Error deleting photo:', error);
       throw error;
     }
   },
-  
+
   /**
    * Set a photo as the cover photo
    * @param {number} photoId - Photo ID
@@ -2086,31 +2093,31 @@ const listingModel = {
         'SELECT * FROM listing_photos WHERE id = ?',
         [photoId]
       );
-      
+
       if (!photo || photo.length === 0) {
         throw notFound('Photo not found');
       }
-      
+
       // Start a transaction
       const connection = await db.getPool().getConnection();
       await connection.beginTransaction();
-      
+
       try {
         // Remove cover flag from all photos of this listing
         await connection.query(
           'UPDATE listing_photos SET is_cover = 0 WHERE listing_id = ?',
           [photo[0].listing_id]
         );
-        
+
         // Set this photo as cover
         await connection.query(
           'UPDATE listing_photos SET is_cover = 1 WHERE id = ?',
           [photoId]
         );
-        
+
         // Commit transaction
         await connection.commit();
-        
+
         return true;
       } catch (error) {
         // Rollback transaction on error
@@ -2136,7 +2143,7 @@ const listingModel = {
         'SELECT * FROM listing_photos WHERE listing_id = ? ORDER BY is_cover DESC, id ASC',
         [listingId]
       );
-      
+
       return photos;
     } catch (error) {
       console.error('Error getting listing photos:', error);
