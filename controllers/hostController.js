@@ -636,14 +636,16 @@ const getPublicAvailableSlots = async (listingId, startDate, endDate, options = 
     const startDateTime = `${startDate} 00:00:00`;
     const endDateTime = `${endDate} 23:59:59`;
 
-    // Get available slots directly from the available_slots table
+    // Get available slots directly from the available_slots table with origin listing info
     const availableSlots = await db.query(`
-      SELECT * FROM available_slots
-      WHERE listing_id = ?
-      AND start_datetime < ?
-      AND end_datetime > ?
-      AND is_available = TRUE
-      ORDER BY start_datetime ASC
+      SELECT s.*, l.title as origin_listing_title 
+      FROM available_slots s
+      LEFT JOIN listings l ON s.origin_listing_id = l.id
+      WHERE s.listing_id = ?
+      AND s.start_datetime < ?
+      AND s.end_datetime > ?
+      AND s.is_available = TRUE
+      ORDER BY s.start_datetime ASC
     `, [listingId, endDateTime, startDateTime]);
 
     if (availableSlots.length === 0) {
@@ -2463,7 +2465,8 @@ const hostController = {
                 price_override: price_override || null,
                 booking_type: booking_type || null,
                 slot_duration: slot_duration || null,
-                is_available: true
+                is_available: true,
+                origin_listing_id: listingId // Track that this slot came from the original listing
               });
               console.log(`Synced slot to Listing ${otherListing.id}`);
             } else {
