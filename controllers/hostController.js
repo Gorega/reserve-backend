@@ -40,6 +40,7 @@ const toMySQLDateTime = (dateTime) => {
  */
 const BOOKING_STATUSES = ['pending', 'confirmed'];
 const DEFAULT_SLOT_DURATION = 60; // Default slot duration in minutes
+const DEBUG_AVAILABILITY = process.env.DEBUG_AVAILABILITY === '1';
 
 /**
  * Helper function to check for reservation conflicts using unified datetime approach
@@ -638,9 +639,13 @@ const getPublicAvailableSlots = async (listingId, startDate, endDate, options = 
 
     // Get available slots directly from the available_slots table with origin listing info
     const availableSlots = await db.query(`
-      SELECT s.*, l.title as origin_listing_title 
+      SELECT 
+        s.*,
+        origin.title as origin_listing_title,
+        current.title as listing_title
       FROM available_slots s
-      LEFT JOIN listings l ON s.origin_listing_id = l.id
+      LEFT JOIN listings origin ON s.origin_listing_id = origin.id
+      JOIN listings current ON s.listing_id = current.id
       WHERE s.listing_id = ?
       AND s.start_datetime < ?
       AND s.end_datetime > ?
@@ -650,6 +655,23 @@ const getPublicAvailableSlots = async (listingId, startDate, endDate, options = 
 
     if (availableSlots.length === 0) {
       return [];
+    }
+
+    if (DEBUG_AVAILABILITY) {
+      console.log('[getPublicAvailableSlots] base slots', {
+        listingId,
+        startDate,
+        endDate,
+        count: availableSlots.length,
+        sample: availableSlots.slice(0, 3).map(s => ({
+          id: s.id,
+          start_datetime: s.start_datetime,
+          end_datetime: s.end_datetime,
+          origin_listing_id: s.origin_listing_id,
+          origin_listing_title: s.origin_listing_title,
+          listing_title: s.listing_title
+        }))
+      });
     }
 
     // Get all confirmed, pending, and completed reservations for this listing in the date range
@@ -728,7 +750,10 @@ const getPublicAvailableSlots = async (listingId, startDate, endDate, options = 
               slot_type: 'hourly',
               price_override: slot.price_override,
               booking_type: listing.booking_type || 'hourly',
-              slot_duration: slotDurationMinutes // Use the actual duration in minutes
+              slot_duration: slotDurationMinutes,
+              origin_listing_id: slot.origin_listing_id || null,
+              origin_listing_title: slot.origin_listing_title || null,
+              listing_title: slot.listing_title || null
             });
 
             slotStart = slotEnd;
@@ -737,7 +762,22 @@ const getPublicAvailableSlots = async (listingId, startDate, endDate, options = 
         }
       }
 
-      return hourlySlots.sort((a, b) => new Date(a.start_datetime) - new Date(b.start_datetime));
+      const sorted = hourlySlots.sort((a, b) => new Date(a.start_datetime) - new Date(b.start_datetime));
+      if (DEBUG_AVAILABILITY) {
+        console.log('[getPublicAvailableSlots] sliced slots', {
+          listingId,
+          count: sorted.length,
+          sample: sorted.slice(0, 3).map(s => ({
+            id: s.id,
+            start_datetime: s.start_datetime,
+            end_datetime: s.end_datetime,
+            origin_listing_id: s.origin_listing_id,
+            origin_listing_title: s.origin_listing_title,
+            listing_title: s.listing_title
+          }))
+        });
+      }
+      return sorted;
     }
 
     // For non-hour unit types, fall back to original logic
@@ -779,7 +819,10 @@ const getPublicAvailableSlots = async (listingId, startDate, endDate, options = 
       slot_type: slot.slot_type || 'split',
       price_override: slot.price_override,
       booking_type: slot.booking_type || listing.booking_type,
-      slot_duration: slot.slot_duration || listing.slot_duration || DEFAULT_SLOT_DURATION
+      slot_duration: slot.slot_duration || listing.slot_duration || DEFAULT_SLOT_DURATION,
+      origin_listing_id: slot.origin_listing_id || null,
+      origin_listing_title: slot.origin_listing_title || null,
+      listing_title: slot.listing_title || null
     }));
   } catch (error) {
     console.error('❌ Error getting public available slots:', error);
