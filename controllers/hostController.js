@@ -2425,9 +2425,16 @@ const hostController = {
       // Synchronize availability with other doctor listings
       try {
         let targetDoctorId = listing.doctor_user_id;
-        // If it's a doctor profile, use the owner's ID
-        if (!targetDoctorId && (listing.is_doctor_listing === 1 || listing.is_doctor_listing === true)) {
-          targetDoctorId = listing.user_id;
+
+        // If no explicit doctor assigned, check if the listing owner themselves is a doctor (has a profile)
+        if (!targetDoctorId) {
+          const [doctorProfile] = await db.query(
+            'SELECT id FROM listings WHERE user_id = ? AND is_doctor_listing = 1 LIMIT 1',
+            [listing.user_id]
+          );
+          if (doctorProfile) {
+            targetDoctorId = listing.user_id;
+          }
         }
 
         if (targetDoctorId) {
