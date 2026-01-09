@@ -2477,10 +2477,10 @@ const hostController = {
               message: 'paired_listing_id must be a clinic listing'
             });
           }
-          if (!target.doctor_user_id || parseInt(target.doctor_user_id, 10) !== parseInt(listing.user_id, 10)) {
+          if (target.doctor_user_id && parseInt(target.doctor_user_id, 10) !== parseInt(listing.user_id, 10)) {
             return res.status(400).json({
               status: 'error',
-              message: 'paired_listing_id clinic must be assigned to this doctor'
+              message: 'paired_listing_id clinic is assigned to another doctor'
             });
           }
         }
